@@ -154,6 +154,199 @@ public class Main {
             }
         });
 
+        app.post("/atividades", ctx -> {
+            String xUsuario = ctx.header("X-Usuario");
+            String role = Database.getUserRole(xUsuario);
+            if (!"organizacao".equals(role)) {
+                ctx.status(403);
+                ctx.json(Map.of("erro", "SOMENTE_ORGANIZACAO", "mensagem", "Apenas organização"));
+                return;
+            }
+
+            Map body;
+            try {
+                body = ctx.bodyAsClass(Map.class);
+            } catch (Exception e) {
+                ctx.status(422);
+                ctx.json(Map.of("erro", "DADOS_INVALIDOS", "mensagem", "Corpo inválido"));
+                return;
+            }
+
+            if (body == null || !body.containsKey("titulo") || !body.containsKey("tipo") || !body.containsKey("salaId") || !body.containsKey("vagas") || !body.containsKey("encontros")) {
+                ctx.status(422);
+                ctx.json(Map.of("erro", "DADOS_INVALIDOS", "mensagem", "Campos obrigatórios ausentes"));
+                return;
+            }
+
+            String titulo = (String) body.get("titulo");
+            String tipo = (String) body.get("tipo");
+            String salaId = (String) body.get("salaId");
+            Object vagasObj = body.get("vagas");
+            List<Map<String, String>> encontrosInput = (List<Map<String, String>>) body.get("encontros");
+
+            if (!"palestra".equals(tipo) && !"minicurso".equals(tipo)) {
+                ctx.status(422);
+                ctx.json(Map.of("erro", "DADOS_INVALIDOS", "mensagem", "Tipo inválido"));
+                return;
+            }
+
+            if (!(vagasObj instanceof Number)) {
+                ctx.status(422);
+                ctx.json(Map.of("erro", "DADOS_INVALIDOS", "mensagem", "Vagas inválidas"));
+                return;
+            }
+            int vagas = ((Number) vagasObj).intValue();
+            if (vagas <= 0) {
+                ctx.status(422);
+                ctx.json(Map.of("erro", "DADOS_INVALIDOS", "mensagem", "Vagas menores ou iguais a zero"));
+                return;
+            }
+
+            try (Connection conn = Database.getConnection()) {
+                PreparedStatement psSala = conn.prepareStatement("SELECT capacidade FROM salas WHERE id = ?");
+                psSala.setString(1, salaId);
+                ResultSet rsSala = psSala.executeQuery();
+                if (!rsSala.next()) {
+                    ctx.status(404);
+                    ctx.json(Map.of("erro", "NAO_ENCONTRADO", "mensagem", "Sala não encontrada"));
+                    return;
+                }
+                int capacidadeSala = rsSala.getInt("capacidade");
+
+                if (encontrosInput == null) {
+                    ctx.status(422);
+                    ctx.json(Map.of("erro", "QUANTIDADE_DE_ENCONTROS", "mensagem", "Encontros nulos"));
+                    return;
+                }
+
+                class ParsedEnc {
+                    OffsetDateTime inicio;
+                    OffsetDateTime fim;
+                }
+
+                List<ParsedEnc> parsed = new ArrayList<>();
+                for (Map<String, String> encMap : encontrosInput) {
+                    String inicioStr = encMap.get("inicio");
+                    String fimStr = encMap.get("fim");
+                    if (inicioStr == null || fimStr == null) {
+                        ctx.status(422);
+                        ctx.json(Map.of("erro", "DADOS_INVALIDOS", "mensagem", "Encontro sem início ou fim"));
+                        return;
+                    }
+                    ParsedEnc pe = new ParsedEnc();
+                    try {
+                        pe.inicio = OffsetDateTime.parse(inicioStr);
+                        pe.fim = OffsetDateTime.parse(fimStr);
+                    } catch (Exception e) {
+                        ctx.status(422);
+                        ctx.json(Map.of("erro", "ENCONTRO_INVALIDO", "mensagem", "Data inválida"));
+                        return;
+                    }
+                    parsed.add(pe);
+                }
+
+                // 1º Conflito de sala/horário (409 CONFLITO_DE_SALA)
+                boolean salaConflito = false;
+                PreparedStatement psCheck = conn.prepareStatement(
+                    "SELECT e.inicio, e.fim FROM encontros e " +
+                    "JOIN atividades a ON e.atividadeId = a.id " +
+                    "WHERE a.salaId = ? AND a.cancelada = 0"
+                );
+                psCheck.setString(1, salaId);
+                ResultSet rsCheck = psCheck.executeQuery();
+                List<ParsedEnc> existing = new ArrayList<>();
+                while (rsCheck.next()) {
+                    ParsedEnc pe = new ParsedEnc();
+                    pe.inicio = OffsetDateTime.parse(rsCheck.getString("inicio"));
+                    pe.fim = OffsetDateTime.parse(rsCheck.getString("fim"));
+                    existing.add(pe);
+                }
+
+                for (ParsedEnc n : parsed) {
+                    for (ParsedEnc ex : existing) {
+                        if (n.inicio.isBefore(ex.fim) && ex.inicio.isBefore(n.fim)) {
+                            salaConflito = true;
+                            break;
+                        }
+                    }
+                    if (salaConflito) break;
+                }
+
+                if (salaConflito) {
+                    ctx.status(409);
+                    ctx.json(Map.of("erro", "CONFLITO_DE_SALA", "mensagem", "Conflito de horário na sala"));
+                    return;
+                }
+
+                // 2º Número de encontros e validade dos encontros (422 QUANTIDADE_DE_ENCONTROS / 422 ENCONTRO_INVALIDO)
+                if ("palestra".equals(tipo) && parsed.size() != 1) {
+                    ctx.status(422);
+                    ctx.json(Map.of("erro", "QUANTIDADE_DE_ENCONTROS", "mensagem", "Palestra deve ter exatamente 1 encontro"));
+                    return;
+                }
+                if ("minicurso".equals(tipo) && (parsed.size() < 2 || parsed.size() > 5)) {
+                    ctx.status(422);
+                    ctx.json(Map.of("erro", "QUANTIDADE_DE_ENCONTROS", "mensagem", "Minicurso deve ter entre 2 e 5 encontros"));
+                    return;
+                }
+
+                for (int i = 0; i < parsed.size(); i++) {
+                    ParsedEnc pe = parsed.get(i);
+                    long mins = Duration.between(pe.inicio, pe.fim).toMinutes();
+                    if (mins < 60 || mins > 240) {
+                        ctx.status(422);
+                        ctx.json(Map.of("erro", "ENCONTRO_INVALIDO", "mensagem", "Duração do encontro deve ser de 1 a 4 horas"));
+                        return;
+                    }
+                    if (!pe.inicio.toLocalDate().equals(pe.fim.toLocalDate())) {
+                        ctx.status(422);
+                        ctx.json(Map.of("erro", "ENCONTRO_INVALIDO", "mensagem", "Encontro deve iniciar e terminar no mesmo dia"));
+                        return;
+                    }
+                    for (int j = i + 1; j < parsed.size(); j++) {
+                        ParsedEnc other = parsed.get(j);
+                        if (pe.inicio.isBefore(other.fim) && other.inicio.isBefore(pe.fim)) {
+                            ctx.status(422);
+                            ctx.json(Map.of("erro", "ENCONTRO_INVALIDO", "mensagem", "Encontros da mesma atividade não podem se sobrepor"));
+                            return;
+                        }
+                    }
+                }
+
+                // 3º Vagas acima da capacidade (422 VAGAS_ACIMA_DA_CAPACIDADE)
+                if (vagas > capacidadeSala) {
+                    ctx.status(422);
+                    ctx.json(Map.of("erro", "VAGAS_ACIMA_DA_CAPACIDADE", "mensagem", "Vagas excedem a capacidade da sala"));
+                    return;
+                }
+
+                String atvId = "atv_" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+                try (PreparedStatement psIns = conn.prepareStatement("INSERT INTO atividades(id, titulo, tipo, salaId, vagas, cancelada) VALUES(?, ?, ?, ?, ?, 0)")) {
+                    psIns.setString(1, atvId);
+                    psIns.setString(2, titulo);
+                    psIns.setString(3, tipo);
+                    psIns.setString(4, salaId);
+                    psIns.setInt(5, vagas);
+                    psIns.executeUpdate();
+                }
+
+                for (ParsedEnc pe : parsed) {
+                    String encId = "enc_" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+                    try (PreparedStatement psEncIns = conn.prepareStatement("INSERT INTO encontros(id, atividadeId, inicio, fim) VALUES(?, ?, ?, ?)")) {
+                        psEncIns.setString(1, encId);
+                        psEncIns.setString(2, atvId);
+                        psEncIns.setString(3, pe.inicio.toString());
+                        psEncIns.setString(4, pe.fim.toString());
+                        psEncIns.executeUpdate();
+                    }
+                }
+
+                Map<String, Object> created = buildAtividade(conn, atvId);
+                ctx.status(201);
+                ctx.json(created);
+            }
+        });
+
         app.start(port);
         return app;
     }

@@ -125,6 +125,20 @@ public class Database {
         }
     }
 
+    public static String getUserRole(String userId) {
+        if (userId == null || userId.isEmpty()) return null;
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement("SELECT papel FROM usuarios WHERE id = ?")) {
+            ps.setString(1, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getString("papel");
+                }
+            }
+        } catch (SQLException e) {}
+        return null;
+    }
+
     public static OffsetDateTime getClock() {
         if ("1".equals(System.getenv("MODO_TESTE")) || "1".equals(System.getProperty("MODO_TESTE"))) {
             return testClock;
