@@ -127,4 +127,62 @@ public class Fatia3Test {
         assertTrue(respPatch.body().contains("Palestra Atualizada"));
         assertTrue(respPatch.body().contains("35"));
     }
+
+    @Test
+    public void recusa_reducao_de_vagas_abaixo_dos_inscritos_com_409_vagas_abaixo_dos_inscritos() throws Exception {
+        HttpRequest resetReq = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/_teste/reset"))
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+        client.send(resetReq, HttpResponse.BodyHandlers.ofString());
+
+        String jsonCreate = "{" +
+                "\"titulo\": \"Palestra com Inscritos\"," +
+                "\"tipo\": \"palestra\"," +
+                "\"salaId\": \"sala-101\"," +
+                "\"vagas\": 20," +
+                "\"encontros\": [" +
+                "  {\"inicio\": \"2026-10-19T14:00:00-03:00\", \"fim\": \"2026-10-19T16:00:00-03:00\"}" +
+                "]" +
+                "}";
+
+        HttpRequest reqCreate = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/atividades"))
+                .header("X-Usuario", "org-ana")
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(jsonCreate))
+                .build();
+
+        HttpResponse<String> respCreate = client.send(reqCreate, HttpResponse.BodyHandlers.ofString());
+        assertEquals(201, respCreate.statusCode());
+
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        java.util.Map map = mapper.readValue(respCreate.body(), java.util.Map.class);
+        String atvId = (String) map.get("id");
+
+        try (java.sql.Connection conn = Database.getConnection();
+             java.sql.PreparedStatement ps = conn.prepareStatement("INSERT INTO inscricoes(id, atividadeId, participanteId, status, criadaEm) VALUES(?, ?, ?, ?, ?)")) {
+            for (int i = 1; i <= 5; i++) {
+                ps.setString(1, "ins_" + i);
+                ps.setString(2, atvId);
+                ps.setString(3, "p-carla");
+                ps.setString(4, "confirmada");
+                ps.setString(5, "2026-10-13T10:00:00-03:00");
+                ps.executeUpdate();
+            }
+        }
+
+        String jsonPatch = "{\"vagas\": 3}";
+
+        HttpRequest reqPatch = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/atividades/" + atvId))
+                .header("X-Usuario", "org-ana")
+                .header("Content-Type", "application/json")
+                .method("PATCH", HttpRequest.BodyPublishers.ofString(jsonPatch))
+                .build();
+
+        HttpResponse<String> respPatch = client.send(reqPatch, HttpResponse.BodyHandlers.ofString());
+        assertEquals(409, respPatch.statusCode());
+        assertTrue(respPatch.body().contains("VAGAS_ABAIXO_DOS_INSCRITOS"));
+    }
 }
