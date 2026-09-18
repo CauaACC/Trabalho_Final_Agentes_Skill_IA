@@ -465,6 +465,47 @@ public class Main {
             }
         });
 
+        app.post("/atividades/{id}/cancelamento", ctx -> {
+            String xUsuario = ctx.header("X-Usuario");
+            String role = Database.getUserRole(xUsuario);
+            if (!"organizacao".equals(role)) {
+                ctx.status(403);
+                ctx.json(Map.of("erro", "SOMENTE_ORGANIZACAO", "mensagem", "Apenas organização"));
+                return;
+            }
+
+            String id = ctx.pathParam("id");
+            try (Connection conn = Database.getConnection()) {
+                Map<String, Object> atv = buildAtividade(conn, id);
+                if (atv == null) {
+                    ctx.status(404);
+                    ctx.json(Map.of("erro", "NAO_ENCONTRADO", "mensagem", "Atividade não encontrada"));
+                    return;
+                }
+
+                if ("cancelada".equals(atv.get("situacao"))) {
+                    ctx.status(422);
+                    ctx.json(Map.of("erro", "ATIVIDADE_CANCELADA", "mensagem", "Atividade já cancelada"));
+                    return;
+                }
+
+                String situacao = (String) atv.get("situacao");
+                if ("em_andamento".equals(situacao) || "encerrada".equals(situacao)) {
+                    ctx.status(422);
+                    ctx.json(Map.of("erro", "ATIVIDADE_JA_INICIADA", "mensagem", "Atividade já iniciada"));
+                    return;
+                }
+
+                try (PreparedStatement psUp = conn.prepareStatement("UPDATE atividades SET cancelada = 1 WHERE id = ?")) {
+                    psUp.setString(1, id);
+                    psUp.executeUpdate();
+                }
+
+                Map<String, Object> updated = buildAtividade(conn, id);
+                ctx.json(updated);
+            }
+        });
+
         app.start(port);
         return app;
     }

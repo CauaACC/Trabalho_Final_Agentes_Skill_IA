@@ -185,4 +185,162 @@ public class Fatia3Test {
         assertEquals(409, respPatch.statusCode());
         assertTrue(respPatch.body().contains("VAGAS_ABAIXO_DOS_INSCRITOS"));
     }
+
+    @Test
+    public void recusa_cancelamento_de_atividade_que_ja_iniciou_com_422_atividade_ja_iniciada() throws Exception {
+        HttpRequest resetReq = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/_teste/reset"))
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+        client.send(resetReq, HttpResponse.BodyHandlers.ofString());
+
+        String jsonCreate = "{" +
+                "\"titulo\": \"Palestra Iniciada\"," +
+                "\"tipo\": \"palestra\"," +
+                "\"salaId\": \"sala-101\"," +
+                "\"vagas\": 20," +
+                "\"encontros\": [" +
+                "  {\"inicio\": \"2026-10-19T10:00:00-03:00\", \"fim\": \"2026-10-19T12:00:00-03:00\"}" +
+                "]" +
+                "}";
+
+        HttpRequest reqCreate = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/atividades"))
+                .header("X-Usuario", "org-ana")
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(jsonCreate))
+                .build();
+
+        HttpResponse<String> respCreate = client.send(reqCreate, HttpResponse.BodyHandlers.ofString());
+        assertEquals(201, respCreate.statusCode());
+
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        java.util.Map map = mapper.readValue(respCreate.body(), java.util.Map.class);
+        String atvId = (String) map.get("id");
+
+        // Advance clock to after start time
+        String jsonRelogio = "{\"agora\": \"2026-10-19T10:30:00-03:00\"}";
+        HttpRequest reqRelogio = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/_teste/relogio"))
+                .header("Content-Type", "application/json")
+                .PUT(HttpRequest.BodyPublishers.ofString(jsonRelogio))
+                .build();
+        client.send(reqRelogio, HttpResponse.BodyHandlers.ofString());
+
+        HttpRequest reqCancel = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/atividades/" + atvId + "/cancelamento"))
+                .header("X-Usuario", "org-ana")
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+
+        HttpResponse<String> respCancel = client.send(reqCancel, HttpResponse.BodyHandlers.ofString());
+        assertEquals(422, respCancel.statusCode());
+        assertTrue(respCancel.body().contains("ATIVIDADE_JA_INICIADA"));
+    }
+
+    @Test
+    public void recusa_cancelamento_de_atividade_ja_cancelada_com_422_atividade_cancelada() throws Exception {
+        HttpRequest resetReq = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/_teste/reset"))
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+        client.send(resetReq, HttpResponse.BodyHandlers.ofString());
+
+        String jsonCreate = "{" +
+                "\"titulo\": \"Palestra Para Cancelar Duas Vezes\"," +
+                "\"tipo\": \"palestra\"," +
+                "\"salaId\": \"sala-101\"," +
+                "\"vagas\": 20," +
+                "\"encontros\": [" +
+                "  {\"inicio\": \"2026-10-19T10:00:00-03:00\", \"fim\": \"2026-10-19T12:00:00-03:00\"}" +
+                "]" +
+                "}";
+
+        HttpRequest reqCreate = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/atividades"))
+                .header("X-Usuario", "org-ana")
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(jsonCreate))
+                .build();
+
+        HttpResponse<String> respCreate = client.send(reqCreate, HttpResponse.BodyHandlers.ofString());
+        assertEquals(201, respCreate.statusCode());
+
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        java.util.Map map = mapper.readValue(respCreate.body(), java.util.Map.class);
+        String atvId = (String) map.get("id");
+
+        // First cancel
+        HttpRequest reqCancel1 = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/atividades/" + atvId + "/cancelamento"))
+                .header("X-Usuario", "org-ana")
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+        HttpResponse<String> respCancel1 = client.send(reqCancel1, HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, respCancel1.statusCode());
+
+        // Second cancel
+        HttpRequest reqCancel2 = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/atividades/" + atvId + "/cancelamento"))
+                .header("X-Usuario", "org-ana")
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+        HttpResponse<String> respCancel2 = client.send(reqCancel2, HttpResponse.BodyHandlers.ofString());
+        assertEquals(422, respCancel2.statusCode());
+        assertTrue(respCancel2.body().contains("ATIVIDADE_CANCELADA"));
+    }
+
+    @Test
+    public void recusa_edicao_de_atividade_cancelada_com_422_atividade_cancelada() throws Exception {
+        HttpRequest resetReq = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/_teste/reset"))
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+        client.send(resetReq, HttpResponse.BodyHandlers.ofString());
+
+        String jsonCreate = "{" +
+                "\"titulo\": \"Palestra Cancelada Edicao\"," +
+                "\"tipo\": \"palestra\"," +
+                "\"salaId\": \"sala-101\"," +
+                "\"vagas\": 20," +
+                "\"encontros\": [" +
+                "  {\"inicio\": \"2026-10-19T10:00:00-03:00\", \"fim\": \"2026-10-19T12:00:00-03:00\"}" +
+                "]" +
+                "}";
+
+        HttpRequest reqCreate = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/atividades"))
+                .header("X-Usuario", "org-ana")
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(jsonCreate))
+                .build();
+
+        HttpResponse<String> respCreate = client.send(reqCreate, HttpResponse.BodyHandlers.ofString());
+        assertEquals(201, respCreate.statusCode());
+
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        java.util.Map map = mapper.readValue(respCreate.body(), java.util.Map.class);
+        String atvId = (String) map.get("id");
+
+        // Cancel activity
+        HttpRequest reqCancel = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/atividades/" + atvId + "/cancelamento"))
+                .header("X-Usuario", "org-ana")
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+        assertEquals(200, client.send(reqCancel, HttpResponse.BodyHandlers.ofString()).statusCode());
+
+        // Try PATCH
+        String jsonPatch = "{\"titulo\": \"Novo Titulo\"}";
+        HttpRequest reqPatch = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/atividades/" + atvId))
+                .header("X-Usuario", "org-ana")
+                .header("Content-Type", "application/json")
+                .method("PATCH", HttpRequest.BodyPublishers.ofString(jsonPatch))
+                .build();
+
+        HttpResponse<String> respPatch = client.send(reqPatch, HttpResponse.BodyHandlers.ofString());
+        assertEquals(422, respPatch.statusCode());
+        assertTrue(respPatch.body().contains("ATIVIDADE_CANCELADA"));
+    }
 }
