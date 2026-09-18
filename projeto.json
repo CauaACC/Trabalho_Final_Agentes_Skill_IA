@@ -1,9 +1,10 @@
-{
-  "stack": "PREENCHER — linguagem e framework da API; tipo e framework da interface",
-  "api": {
-    "pasta": "api",
-    "instalar": "PREENCHER — por exemplo: npm install",
-    "iniciar": "PREENCHER — por exemplo: npm start"
-  },
-  "testes": []
+{ 
+  "stack": "Java 21, Javalin, SQLite, HTML+JS", 
+  "api": { 
+    "pasta": "api", 
+    "instalar": "./mvnw dependency:go-offline", 
+    "iniciar": "./mvnw exec:java -Dexec.mainClass=\\"br.com.semanaacademica.Main\\"", 
+    "testar": "./mvnw test" 
+  }, 
+  "testes": [] 
 }

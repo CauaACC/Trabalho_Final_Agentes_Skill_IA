@@ -4,7 +4,7 @@ Cada integrante é dono de um módulo inteiro: entrevista, spec, testes, API, te
 
 | Módulo | Dono | Usuário do GitHub |
 |---|---|---|
-| M1 — Grade de atividades | | |
+| M1 — Grade de atividades | Cauã Amaral Costeski Crosati | CauaACC |
 | M2 — Inscrições e lista de espera | | |
 | M3 — Presença por QR | | |
 | M4 — Certificados (grupos de 4 e 5) | | |
