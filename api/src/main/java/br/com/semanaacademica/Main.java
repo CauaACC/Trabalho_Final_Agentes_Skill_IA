@@ -347,6 +347,124 @@ public class Main {
             }
         });
 
+        app.patch("/atividades/{id}", ctx -> {
+            String xUsuario = ctx.header("X-Usuario");
+            String role = Database.getUserRole(xUsuario);
+            if (!"organizacao".equals(role)) {
+                ctx.status(403);
+                ctx.json(Map.of("erro", "SOMENTE_ORGANIZACAO", "mensagem", "Apenas organização"));
+                return;
+            }
+
+            String id = ctx.pathParam("id");
+            Map body;
+            try {
+                body = ctx.bodyAsClass(Map.class);
+            } catch (Exception e) {
+                ctx.status(422);
+                ctx.json(Map.of("erro", "DADOS_INVALIDOS", "mensagem", "Corpo inválido"));
+                return;
+            }
+
+            if (body == null) {
+                ctx.status(422);
+                ctx.json(Map.of("erro", "DADOS_INVALIDOS", "mensagem", "Corpo ausente"));
+                return;
+            }
+
+            try (Connection conn = Database.getConnection()) {
+                Map<String, Object> atv = buildAtividade(conn, id);
+                if (atv == null) {
+                    ctx.status(404);
+                    ctx.json(Map.of("erro", "NAO_ENCONTRADO", "mensagem", "Atividade não encontrada"));
+                    return;
+                }
+
+                if ("cancelada".equals(atv.get("situacao"))) {
+                    ctx.status(422);
+                    ctx.json(Map.of("erro", "ATIVIDADE_CANCELADA", "mensagem", "Atividade cancelada não pode ser editada"));
+                    return;
+                }
+
+                for (Object key : body.keySet()) {
+                    String k = (String) key;
+                    if (!"titulo".equals(k) && !"vagas".equals(k)) {
+                        ctx.status(422);
+                        ctx.json(Map.of("erro", "CAMPO_NAO_EDITAVEL", "mensagem", "Campo não editável"));
+                        return;
+                    }
+                }
+
+                String newTitulo = (String) body.get("titulo");
+                Object newVagasObj = body.get("vagas");
+
+                String sqlUpdate = "UPDATE atividades SET ";
+                List<Object> params = new ArrayList<>();
+                boolean hasUpdate = false;
+
+                if (newTitulo != null) {
+                    sqlUpdate += "titulo = ?";
+                    params.add(newTitulo);
+                    hasUpdate = true;
+                }
+
+                if (newVagasObj != null) {
+                    if (!(newVagasObj instanceof Number)) {
+                        ctx.status(422);
+                        ctx.json(Map.of("erro", "DADOS_INVALIDOS", "mensagem", "Vagas inválidas"));
+                        return;
+                    }
+                    int newVagas = ((Number) newVagasObj).intValue();
+                    if (newVagas <= 0) {
+                        ctx.status(422);
+                        ctx.json(Map.of("erro", "DADOS_INVALIDOS", "mensagem", "Vagas menores ou iguais a zero"));
+                        return;
+                    }
+
+                    String salaId = (String) atv.get("salaId");
+                    PreparedStatement psSala = conn.prepareStatement("SELECT capacidade FROM salas WHERE id = ?");
+                    psSala.setString(1, salaId);
+                    ResultSet rsSala = psSala.executeQuery();
+                    if (rsSala.next()) {
+                        int cap = rsSala.getInt("capacidade");
+                        if (newVagas > cap) {
+                            ctx.status(422);
+                            ctx.json(Map.of("erro", "VAGAS_ACIMA_DA_CAPACIDADE", "mensagem", "Vagas acima da capacidade da sala"));
+                            return;
+                        }
+                    }
+
+                    int ocupadas = (int) atv.get("ocupadas");
+                    if (newVagas < ocupadas) {
+                        ctx.status(409);
+                        ctx.json(Map.of("erro", "VAGAS_ABAIXO_DOS_INSCRITOS", "mensagem", "Vagas abaixo dos inscritos"));
+                        return;
+                    }
+
+                    if (hasUpdate) {
+                        sqlUpdate += ", ";
+                    }
+                    sqlUpdate += "vagas = ?";
+                    params.add(newVagas);
+                    hasUpdate = true;
+                }
+
+                if (hasUpdate) {
+                    sqlUpdate += " WHERE id = ?";
+                    params.add(id);
+                    try (PreparedStatement psUp = conn.prepareStatement(sqlUpdate)) {
+                        for (int i = 0; i < params.size(); i++) {
+                            psUp.setObject(i + 1, params.get(i));
+                        }
+                        psUp.executeUpdate();
+                    }
+                }
+
+                Map<String, Object> updated = buildAtividade(conn, id);
+                ctx.json(updated);
+            }
+        });
+
         app.start(port);
         return app;
     }
