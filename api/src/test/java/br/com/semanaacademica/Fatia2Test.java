@@ -224,4 +224,52 @@ public class Fatia2Test {
         assertEquals(409, resp2.statusCode());
         assertTrue(resp2.body().contains("CONFLITO_DE_SALA"));
     }
+
+    @Test
+    public void recusa_criacao_de_atividade_com_encontros_sobrepostos_na_mesma_sala() throws Exception {
+        HttpRequest resetReq = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/_teste/reset"))
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+        client.send(resetReq, HttpResponse.BodyHandlers.ofString());
+
+        String jsonBody1 = "{" +
+                "\"titulo\": \"Atividade Base\"," +
+                "\"tipo\": \"palestra\"," +
+                "\"salaId\": \"sala-101\"," +
+                "\"vagas\": 30," +
+                "\"encontros\": [" +
+                "  {\"inicio\": \"2026-10-19T10:00:00-03:00\", \"fim\": \"2026-10-19T12:00:00-03:00\"}" +
+                "]" +
+                "}";
+
+        HttpRequest req1 = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/atividades"))
+                .header("X-Usuario", "org-ana")
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(jsonBody1))
+                .build();
+        client.send(req1, HttpResponse.BodyHandlers.ofString());
+
+        String jsonBody2 = "{" +
+                "\"titulo\": \"Atividade Sobreposta\"," +
+                "\"tipo\": \"palestra\"," +
+                "\"salaId\": \"sala-101\"," +
+                "\"vagas\": 30," +
+                "\"encontros\": [" +
+                "  {\"inicio\": \"2026-10-19T11:00:00-03:00\", \"fim\": \"2026-10-19T13:00:00-03:00\"}" +
+                "]" +
+                "}";
+
+        HttpRequest req2 = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/atividades"))
+                .header("X-Usuario", "org-ana")
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(jsonBody2))
+                .build();
+
+        HttpResponse<String> resp2 = client.send(req2, HttpResponse.BodyHandlers.ofString());
+        assertEquals(409, resp2.statusCode());
+        assertTrue(resp2.body().contains("CONFLITO_DE_SALA"));
+    }
 }
