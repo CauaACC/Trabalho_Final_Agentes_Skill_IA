@@ -1,0 +1,119 @@
+{
+ "info": {
+  "id": "ses_f4d7df08affeMainQscVArNMwV",
+  "slug": "kind-river",
+  "projectID": "adb270ba2fa750e323d06a2c3385f2cda29f4755",
+  "directory": "F:\\trabalhos_facul\\Github_Facul\\Trabalho_Final_Agentes_Skill_IA",
+  "path": "",
+  "title": "Planejamento do módulo M1: grade de atividades",
+  "agent": "build",
+  "model": {
+   "id": "gemini-2.5-flash",
+   "providerID": "google"
+  },
+  "version": "1.18.31",
+  "summary": {
+   "additions": 0,
+   "deletions": 0,
+   "files": 0
+  },
+  "cost": 0,
+  "tokens": {
+   "input": 0,
+   "output": 0,
+   "reasoning": 0,
+   "cache": {
+    "read": 0,
+    "write": 0
+   }
+  },
+  "time": {
+   "created": 1789701263221,
+   "updated": 1789701263503
+  }
+ },
+ "messages": [
+  {
+   "info": {
+    "role": "user",
+    "time": {
+     "created": 1789701263235
+    },
+    "agent": "build",
+    "model": {
+     "providerID": "google",
+     "modelID": "gemini-2.5-flash"
+    },
+    "summary": {
+     "diffs": []
+    },
+    "id": "msg_0b2820f83001SefADhPU1urvGr",
+    "sessionID": "ses_f4d7df08affeMainQscVArNMwV"
+   },
+   "parts": [
+    {
+     "type": "text",
+     "text": "Use a skill grilling. Vamos decidir o módulo M1 (grade de atividades) da Semana Acadêmica antes de qualquer código. Leia o contrato-api.md. Eu não tenho as regras de cabeça: quando eu responder \"consultar requisitos\", registre a pergunta como pendente. Mantenha tudo em entrevistas/M1-grade.md. ",
+     "id": "prt_0b2820f84001hMgZ13K4d2GF8Z",
+     "sessionID": "ses_f4d7df08affeMainQscVArNMwV",
+     "messageID": "msg_0b2820f83001SefADhPU1urvGr"
+    }
+   ]
+  },
+  {
+   "info": {
+    "parentID": "msg_0b2820f83001SefADhPU1urvGr",
+    "role": "assistant",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+     "cwd": "F:\\trabalhos_facul\\Github_Facul\\Trabalho_Final_Agentes_Skill_IA",
+     "root": "F:\\trabalhos_facul\\Github_Facul\\Trabalho_Final_Agentes_Skill_IA"
+    },
+    "cost": 0,
+    "tokens": {
+     "input": 0,
+     "output": 0,
+     "reasoning": 0,
+     "cache": {
+      "read": 0,
+      "write": 0
+     }
+    },
+    "modelID": "gemini-2.5-flash",
+    "providerID": "google",
+    "time": {
+     "created": 1789701263243,
+     "completed": 1789701264341
+    },
+    "error": {
+     "name": "APIError",
+     "data": {
+      "message": "This model models/gemini-2.5-flash is no longer available to new users. Please update your code to use models/gemini-3.6-flash for the latest features and improvements. We recommend you to use the Interactions API.",
+      "statusCode": 404,
+      "isRetryable": false,
+      "responseHeaders": {
+       "alt-svc": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000",
+       "content-length": "297",
+       "content-type": "text/event-stream",
+       "date": "Fri, 18 Sep 2026 03:15:32 GMT",
+       "server": "scaffolding on HTTPServer2",
+       "server-timing": "gfet4t7; dur=388",
+       "vary": "Origin, X-Origin, Referer",
+       "x-content-type-options": "nosniff",
+       "x-frame-options": "SAMEORIGIN",
+       "x-xss-protection": "0"
+      },
+      "responseBody": "{\n  \"error\": {\n    \"code\": 404,\n    \"message\": \"This model models/gemini-2.5-flash is no longer available to new users. Please update your code to use models/gemini-3.6-flash for the latest features and improvements. We recommend you to use the Interactions API.\",\n    \"status\": \"NOT_FOUND\"\n  }\n}\n",
+      "metadata": {
+       "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse"
+      }
+     }
+    },
+    "id": "msg_0b2820f8b001yZHX3fvTK0RgXe",
+    "sessionID": "ses_f4d7df08affeMainQscVArNMwV"
+   },
+   "parts": []
+  }
+ ]
+}
