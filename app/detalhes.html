@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Detalhes da Atividade - Semana Acadêmica (M1)</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Semana Acadêmica 2026</h1>
+      <nav>
+        <a href="index.html">Programação</a>
+        <a href="nova-atividade.html">Nova Atividade</a>
+      </nav>
+    </header>
+
+    <div id="user-selector-container"></div>
+
+    <div style="margin-bottom: 20px;">
+      <a href="index.html" style="color: var(--primary); text-decoration: none; font-weight: 500;">&larr; Voltar para a Programação</a>
+    </div>
+
+    <div id="alert-box" class="alert"></div>
+
+    <div class="card" id="atividade-card">
+      <h2 id="atv-titulo">Carregando detalhes...</h2>
+      <div id="atv-detalhes-conteudo" style="margin-top: 15px;">
+        <p style="color: var(--text-muted);">Buscando informações da atividade...</p>
+      </div>
+    </div>
+
+    <div class="card" id="encontros-card" style="display: none;">
+      <h3>Encontros Programados</h3>
+      <div id="lista-encontros" style="margin-top: 15px;">
+        <!-- Encontros aqui -->
+      </div>
+    </div>
+
+    <div class="card" id="organizacao-card" style="display: none;">
+      <h3>Ações da Organização</h3>
+      <p style="color: var(--text-muted); margin-bottom: 15px; font-size: 14px;">
+        Ações restritas a usuários com papel de organização.
+      </p>
+      <button id="btn-cancelar" class="danger">Cancelar Atividade</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+  <script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const atividadeId = urlParams.get('id');
+
+    async function carregarDetalhes() {
+      clearAlert('alert-box');
+      if (!atividadeId) {
+        showError('alert-box', { error: 'ID_AUSENTE', message: 'Nenhum ID de atividade foi fornecido na URL.' });
+        return;
+      }
+
+      try {
+        const atv = await apiFetch(`/atividades/${atividadeId}`);
+
+        document.getElementById('atv-titulo').textContent = atv.titulo;
+        
+        const conteudo = document.getElementById('atv-detalhes-conteudo');
+        conteudo.innerHTML = `
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
+            <div><strong>ID:</strong> <span style="font-family: monospace;">${atv.id}</span></div>
+            <div><strong>Tipo:</strong> <span class="badge ${atv.tipo}">${atv.tipo}</span></div>
+            <div><strong>Sala:</strong> ${escapeHtml(atv.salaId)}</div>
+            <div><strong>Situação:</strong> <span class="badge ${atv.situacao}">${formatarSituacao(atv.situacao)}</span></div>
+            <div><strong>Carga Horária:</strong> ${atv.cargaHorariaMinutos} minutos (${Math.floor(atv.cargaHorariaMinutos / 60)}h)</div>
+            <div><strong>Vagas Totais:</strong> ${atv.vagas}</div>
+            <div><strong>Vagas Ocupadas:</strong> ${atv.ocupadas}</div>
+            <div><strong>Vagas Restantes:</strong> ${atv.vagasRestantes}</div>
+            <div><strong>Em Espera:</strong> ${atv.emEspera}</div>
+          </div>
+        `;
+
+        if (atv.encontros && atv.encontros.length > 0) {
+          document.getElementById('encontros-card').style.display = 'block';
+          const listaEncontros = document.getElementById('lista-encontros');
+          listaEncontros.innerHTML = atv.encontros.map((enc, idx) => `
+            <div class="encontro-item">
+              <strong>Encontro ${idx + 1}</strong> (ID: <span style="font-family: monospace;">${enc.id}</span>)<br>
+              Início: ${formatarDataIso(enc.inicio)}<br>
+              Fim: ${formatarDataIso(enc.fim)}
+            </div>
+          `).join('');
+        }
+
+        // Show organization card
+        document.getElementById('organizacao-card').style.display = 'block';
+
+      } catch (err) {
+        showError('alert-box', err);
+        document.getElementById('atv-titulo').textContent = 'Erro ao carregar';
+        document.getElementById('atv-detalhes-conteudo').innerHTML = `<p style="color: var(--danger);">${err.message}</p>`;
+      }
+    }
+
+    async function cancelarAtividade() {
+      if (!confirm('Tem certeza que deseja cancelar esta atividade? Esta ação não pode ser desfeita.')) return;
+      clearAlert('alert-box');
+
+      try {
+        await apiFetch(`/atividades/${atividadeId}/cancelamento`, {
+          method: 'POST'
+        });
+        showSuccess('alert-box', 'Atividade cancelada com sucesso!');
+        carregarDetalhes();
+      } catch (err) {
+        showError('alert-box', err);
+      }
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+
+    function formatarSituacao(sit) {
+      const map = {
+        'prevista': 'Prevista',
+        'em_andamento': 'Em Andamento',
+        'encerrada': 'Encerrada',
+        'cancelada': 'Cancelada'
+      };
+      return map[sit] || sit;
+    }
+
+    function formatarDataIso(isoStr) {
+      if (!isoStr) return '';
+      try {
+        const d = new Date(isoStr);
+        return d.toLocaleString('pt-BR');
+      } catch (e) {
+        return isoStr;
+      }
+    }
+
+    document.getElementById('btn-cancelar').addEventListener('click', cancelarAtividade);
+    window.addEventListener('userChanged', carregarDetalhes);
+
+    document.addEventListener('DOMContentLoaded', () => {
+      carregarDetalhes();
+    });
+  </script>
+</body>
+</html>

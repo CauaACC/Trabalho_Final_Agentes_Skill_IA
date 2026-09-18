@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Criar Atividade - Semana Acadêmica (M1)</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Semana Acadêmica 2026</h1>
+      <nav>
+        <a href="index.html">Programação</a>
+        <a href="nova-atividade.html">Nova Atividade</a>
+      </nav>
+    </header>
+
+    <div id="user-selector-container"></div>
+
+    <div class="card">
+      <h2>Cadastrar Nova Atividade</h2>
+      <p style="color: var(--text-muted); margin-bottom: 20px; font-size: 14px;">
+        Formulário restrito à organização para agendar palestras e minicursos.
+      </p>
+
+      <div id="alert-box" class="alert"></div>
+
+      <form id="form-atividade">
+        <div style="margin-bottom: 15px;">
+          <label for="titulo">Título da Atividade *</label>
+          <input type="text" id="titulo" required placeholder="Ex: Flutter do zero" style="width: 100%;">
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+          <div class="filter-group">
+            <label for="tipo">Tipo *</label>
+            <select id="tipo" required>
+              <option value="palestra">Palestra (1 encontro)</option>
+              <option value="minicurso">Minicurso (2 a 5 encontros)</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label for="salaId">Sala *</label>
+            <select id="salaId" required>
+              <option value="">Carregando salas...</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="margin-bottom: 20px;">
+          <label for="vagas">Número de Vagas *</label>
+          <input type="number" id="vagas" required min="1" value="20" style="width: 100%;">
+        </div>
+
+        <div style="margin-bottom: 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <label style="margin: 0;">Encontros *</label>
+            <button type="button" id="btn-add-encontro" style="padding: 4px 10px; font-size: 12px;">+ Adicionar Encontro</button>
+          </div>
+          <div id="encontros-container">
+            <!-- Dynamic encounter inputs -->
+          </div>
+        </div>
+
+        <button type="submit" style="width: 100%; padding: 12px; font-size: 16px;">Criar Atividade</button>
+      </form>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+  <script>
+    async function carregarSalas() {
+      try {
+        const salas = await apiFetch('/salas');
+        const select = document.getElementById('salaId');
+        select.innerHTML = salas.map(s => `<option value="${s.id}">${s.nome} (Capacidade: ${s.capacidade})</option>`).join('');
+      } catch (err) {
+        showError('alert-box', err);
+      }
+    }
+
+    function renderizarEncontros() {
+      const tipo = document.getElementById('tipo').value;
+      const container = document.getElementById('encontros-container');
+      
+      // Default dates during Semana Acadêmica 2026 (19/10/2026)
+      const defaultDate = '2026-10-19';
+      
+      let count = container.children.length;
+      if (count === 0) {
+        // Initial setup based on type
+        count = tipo === 'palestra' ? 1 : 2;
+      }
+
+      let html = '';
+      for (let i = 0; i < count; i++) {
+        html += `
+          <div class="encontro-input-group" style="background: #f8fafc; padding: 15px; border-radius: 6px; margin-bottom: 10px; border: 1px solid var(--border);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <strong>Encontro ${i + 1}</strong>
+              ${count > 1 ? `<button type="button" class="btn-remove-encontro danger" data-index="${i}" style="padding: 2px 8px; font-size: 11px;">Remover</button>` : ''}
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <div>
+                <label>Início (ISO 8601 com fuso)</label>
+                <input type="datetime-local" class="enc-inicio" required value="${defaultDate}T19:00">
+              </div>
+              <div>
+                <label>Fim (ISO 8601 com fuso)</label>
+                <input type="datetime-local" class="enc-fim" required value="${defaultDate}T22:00">
+              </div>
+            </div>
+          </div>
+        `;
+      }
+      container.innerHTML = html;
+
+      // Add remove listeners
+      container.querySelectorAll('.btn-remove-encontro').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const tipoVal = document.getElementById('tipo').value;
+          const min = tipoVal === 'palestra' ? 1 : 2;
+          if (container.children.length <= min) {
+            alert(`O tipo ${tipoVal} exige no mínimo ${min} encontro(s).`);
+            return;
+          }
+          e.target.closest('.encontro-input-group').remove();
+        });
+      });
+    }
+
+    document.getElementById('tipo').addEventListener('change', (e) => {
+      const tipo = e.target.value;
+      const container = document.getElementById('encontros-container');
+      if (tipo === 'palestra') {
+        // Keep only 1
+        renderizarEncontrosFixed(1);
+      } else {
+        if (container.children.length < 2) {
+          renderizarEncontrosFixed(2);
+        }
+      }
+    });
+
+    function renderizarEncontrosFixed(count) {
+      const container = document.getElementById('encontros-container');
+      const defaultDate = '2026-10-19';
+      let html = '';
+      for (let i = 0; i < count; i++) {
+        html += `
+          <div class="encontro-input-group" style="background: #f8fafc; padding: 15px; border-radius: 6px; margin-bottom: 10px; border: 1px solid var(--border);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <strong>Encontro ${i + 1}</strong>
+              ${count > 1 ? `<button type="button" class="btn-remove-encontro danger" style="padding: 2px 8px; font-size: 11px;" onclick="this.closest('.encontro-input-group').remove()">Remover</button>` : ''}
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <div>
+                <label>Início</label>
+                <input type="datetime-local" class="enc-inicio" required value="${defaultDate}T19:00">
+              </div>
+              <div>
+                <label>Fim</label>
+                <input type="datetime-local" class="enc-fim" required value="${defaultDate}T22:00">
+              </div>
+            </div>
+          </div>
+        `;
+      }
+      container.innerHTML = html;
+    }
+
+    document.getElementById('btn-add-encontro').addEventListener('click', () => {
+      const tipo = document.getElementById('tipo').value;
+      const container = document.getElementById('encontros-container');
+      if (tipo === 'palestra') {
+        alert('Palestras devem possuir exatamente 1 encontro.');
+        return;
+      }
+      if (container.children.length >= 5) {
+        alert('Minicursos podem ter no máximo 5 encontros.');
+        return;
+      }
+      const idx = container.children.length;
+      const div = document.createElement('div');
+      div.className = 'encontro-input-group';
+      div.style.cssText = 'background: #f8fafc; padding: 15px; border-radius: 6px; margin-bottom: 10px; border: 1px solid var(--border);';
+      div.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <strong>Encontro ${idx + 1}</strong>
+          <button type="button" class="btn-remove-encontro danger" style="padding: 2px 8px; font-size: 11px;" onclick="this.closest('.encontro-input-group').remove()">Remover</button>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <div>
+            <label>Início</label>
+            <input type="datetime-local" class="enc-inicio" required value="2026-10-2${idx}T19:00">
+          </div>
+          <div>
+            <label>Fim</label>
+            <input type="datetime-local" class="enc-fim" required value="2026-10-2${idx}T22:00">
+          </div>
+        </div>
+      `;
+      container.appendChild(div);
+    });
+
+    document.getElementById('form-atividade').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      clearAlert('alert-box');
+
+      const titulo = document.getElementById('titulo').value;
+      const tipo = document.getElementById('tipo').value;
+      const salaId = document.getElementById('salaId').value;
+      const vagas = parseInt(document.getElementById('vagas').value, 10);
+
+      const encontrosNodes = document.querySelectorAll('.encontro-input-group');
+      const encontros = [];
+      encontrosNodes.forEach(node => {
+        const inicioInput = node.querySelector('.enc-inicio').value;
+        const fimInput = node.querySelector('.enc-fim').value;
+        // Convert datetime-local to ISO 8601 with timezone (-03:00)
+        if (inicioInput && fimInput) {
+          encontros.push({
+            inicio: inicioInput.length === 16 ? inicioInput + ':00-03:00' : inicioInput,
+            fim: fimInput.length === 16 ? fimInput + ':00-03:00' : fimInput
+          });
+        }
+      });
+
+      const payload = {
+        titulo,
+        tipo,
+        salaId,
+        vagas,
+        encontros
+      };
+
+      try {
+        const novaAtv = await apiFetch('/atividades', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+
+        showSuccess('alert-box', `Atividade criada com sucesso! ID: <strong>${novaAtv.id}</strong>. Redirecionando para detalhes...`);
+        setTimeout(() => {
+          window.location.href = `detalhes.html?id=${novaAtv.id}`;
+        }, 1500);
+
+      } catch (err) {
+        showError('alert-box', err);
+      }
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+      carregarSalas();
+      renderizarEncontrosFixed(1);
+    });
+  </script>
+</body>
+</html>

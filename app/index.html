@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Semana Acadêmica - Programação (M1)</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Semana Acadêmica 2026</h1>
+      <nav>
+        <a href="index.html">Programação</a>
+        <a href="nova-atividade.html">Nova Atividade</a>
+      </nav>
+    </header>
+
+    <div id="user-selector-container"></div>
+
+    <div class="card">
+      <h2>Programação de Atividades</h2>
+      <p style="color: var(--text-muted); margin-bottom: 15px; font-size: 14px;">
+        Consulte as palestras e minicursos programados por dia e tipo.
+      </p>
+
+      <div id="alert-box" class="alert"></div>
+
+      <div class="filters">
+        <div class="filter-group">
+          <label for="filtro-dia">Filtrar por Dia:</label>
+          <input type="date" id="filtro-dia" value="2026-10-19" min="2026-10-19" max="2026-10-23">
+        </div>
+        <div class="filter-group">
+          <label for="filtro-tipo">Filtrar por Tipo:</label>
+          <select id="filtro-tipo">
+            <option value="">Todos os tipos</option>
+            <option value="palestra">Palestra</option>
+            <option value="minicurso">Minicurso</option>
+          </select>
+        </div>
+        <div class="filter-group" style="justify-content: flex-end;">
+          <button id="btn-filtrar" style="margin-top: auto;">Atualizar Grade</button>
+        </div>
+      </div>
+
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Título</th>
+              <th>Tipo</th>
+              <th>Sala</th>
+              <th>Situação</th>
+              <th>Vagas Restantes</th>
+              <th>Carga Horária</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody id="tabela-atividades">
+            <tr>
+              <td colspan="7" style="text-align: center; color: var(--text-muted);">Carregando atividades...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+  <script>
+    async function carregarAtividades() {
+      clearAlert('alert-box');
+      const dia = document.getElementById('filtro-dia').value;
+      const tipo = document.getElementById('filtro-tipo').value;
+
+      let query = '';
+      const params = [];
+      if (dia) params.push(`dia=${dia}`);
+      if (tipo) params.push(`tipo=${tipo}`);
+      if (params.length > 0) {
+        query = '?' + params.join('&');
+      }
+
+      const tbody = document.getElementById('tabela-atividades');
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted);">Carregando...</td></tr>`;
+
+      try {
+        const atividades = await apiFetch(`/atividades${query}`);
+        
+        if (atividades.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted);">Nenhuma atividade encontrada para os filtros selecionados.</td></tr>`;
+          return;
+        }
+
+        tbody.innerHTML = atividades.map(atv => `
+          <tr>
+            <td><strong>${escapeHtml(atv.titulo)}</strong></td>
+            <td><span class="badge ${atv.tipo}">${atv.tipo}</span></td>
+            <td>${escapeHtml(atv.salaId)}</td>
+            <td><span class="badge ${atv.situacao}">${formatarSituacao(atv.situacao)}</span></td>
+            <td>${atv.vagasRestantes} / ${atv.vagas}</td>
+            <td>${Math.floor(atv.cargaHorariaMinutos / 60)}h (${atv.cargaHorariaMinutos} min)</td>
+            <td>
+              <a href="detalhes.html?id=${atv.id}" style="color: var(--primary); text-decoration: none; font-weight: 500;">Ver Detalhes</a>
+            </td>
+          </tr>
+        `).join('');
+
+      } catch (err) {
+        showError('alert-box', err);
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--danger);">Erro ao carregar atividades.</td></tr>`;
+      }
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+
+    function formatarSituacao(sit) {
+      const map = {
+        'prevista': 'Prevista',
+        'em_andamento': 'Em Andamento',
+        'encerrada': 'Encerrada',
+        'cancelada': 'Cancelada'
+      };
+      return map[sit] || sit;
+    }
+
+    document.getElementById('btn-filtrar').addEventListener('click', carregarAtividades);
+    document.getElementById('filtro-dia').addEventListener('change', carregarAtividades);
+    document.getElementById('filtro-tipo').addEventListener('change', carregarAtividades);
+    window.addEventListener('userChanged', carregarAtividades);
+
+    document.addEventListener('DOMContentLoaded', () => {
+      carregarAtividades();
+    });
+  </script>
+</body>
+</html>
