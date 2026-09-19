@@ -697,7 +697,81 @@ public class Main {
             ctx.json(lista);
         });
 
+        app.post("/inscricoes/{id}/cancelamento", ctx -> {
+            String xUsuario = ctx.header("X-Usuario");
+            String role = Database.getUserRole(xUsuario);
+            if (!"participante".equals(role)) {
+                ctx.status(403);
+                ctx.json(Map.of("erro", "SOMENTE_PARTICIPANTE", "mensagem", "Apenas participante"));
+                return;
+            }
+
+            String id = ctx.pathParam("id");
+            try (Connection conn = Database.getConnection()) {
+                PreparedStatement ps = conn.prepareStatement("SELECT id, atividadeId, participanteId, status, posicaoNaEspera, convocadaAte, criadaEm FROM inscricoes WHERE id = ?");
+                ps.setString(1, id);
+                ResultSet rs = ps.executeQuery();
+                if (!rs.next()) {
+                    ctx.status(404);
+                    ctx.json(Map.of("erro", "NAO_ENCONTRADO", "mensagem", "Inscrição não encontrada"));
+                    return;
+                }
+
+                String partId = rs.getString("participanteId");
+                if (!partId.equals(xUsuario)) {
+                    ctx.status(404);
+                    ctx.json(Map.of("erro", "NAO_ENCONTRADO", "mensagem", "Inscrição não encontrada"));
+                    return;
+                }
+
+                String status = rs.getString("status");
+                String atividadeId = rs.getString("atividadeId");
+
+                if (!"confirmada".equals(status) && !"em_espera".equals(status) && !"convocada".equals(status)) {
+                    ctx.status(422);
+                    ctx.json(Map.of("erro", "INSCRICAO_INATIVA", "mensagem", "Inscrição já está inativa ou cancelada"));
+                    return;
+                }
+
+                Map<String, Object> atv = buildAtividade(conn, atividadeId);
+                if (atv != null) {
+                    List<Map<String, String>> encontros = (List<Map<String, String>>) atv.get("encontros");
+                    if (!encontros.isEmpty()) {
+                        OffsetDateTime primeiroInicio = OffsetDateTime.parse(encontros.get(0).get("inicio"));
+                        OffsetDateTime agora = Database.getClock();
+                        if (!agora.isBefore(primeiroInicio)) {
+                            ctx.status(422);
+                            ctx.json(Map.of("erro", "ATIVIDADE_JA_INICIADA", "mensagem", "Atividade já iniciada"));
+                            return;
+                        }
+                    }
+                }
+
+                try (PreparedStatement psUp = conn.prepareStatement("UPDATE inscricoes SET status = 'cancelada' WHERE id = ?")) {
+                    psUp.setString(1, id);
+                    psUp.executeUpdate();
+                }
+
+                Map<String, Object> ins = new HashMap<>();
+                ins.put("id", rs.getString("id"));
+                ins.put("atividadeId", atividadeId);
+                ins.put("participanteId", partId);
+                ins.put("status", "cancelada");
+                int pos = rs.getInt("posicaoNaEspera");
+                if (rs.wasNull()) {
+                    ins.put("posicaoNaEspera", null);
+                } else {
+                    ins.put("posicaoNaEspera", pos);
+                }
+                ins.put("convocadaAte", rs.getString("convocadaAte"));
+                ins.put("criadaEm", rs.getString("criadaEm"));
+                ctx.json(ins);
+            }
+        });
+
         app.get("/inscricoes/{id}", ctx -> {
+            String xUsuario = ctx.header("X-Usuario");
+            String role = Database.getUserRole(xUsuario);
             String id = ctx.pathParam("id");
             try (Connection conn = Database.getConnection();
                  PreparedStatement ps = conn.prepareStatement("SELECT id, atividadeId, participanteId, status, posicaoNaEspera, convocadaAte, criadaEm FROM inscricoes WHERE id = ?")) {
@@ -708,6 +782,13 @@ public class Main {
                         ctx.json(Map.of("erro", "NAO_ENCONTRADO", "mensagem", "Inscrição não encontrada"));
                         return;
                     }
+                    String partId = rs.getString("participanteId");
+                    if ("participante".equals(role) && !partId.equals(xUsuario)) {
+                        ctx.status(404);
+                        ctx.json(Map.of("erro", "NAO_ENCONTRADO", "mensagem", "Inscrição não encontrada"));
+                        return;
+                    }
+
                     Map<String, Object> ins = new HashMap<>();
                     ins.put("id", rs.getString("id"));
                     ins.put("atividadeId", rs.getString("atividadeId"));
