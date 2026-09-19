@@ -860,6 +860,42 @@ public class Main {
                     return;
                 }
 
+                if ((Boolean) atv.getOrDefault("cancelada", false) || "cancelada".equals(atv.get("situacao"))) {
+                    ctx.status(422);
+                    ctx.json(Map.of("erro", "ATIVIDADE_CANCELADA", "mensagem", "Atividade cancelada"));
+                    return;
+                }
+
+                PreparedStatement psInscricao = conn.prepareStatement("SELECT 1 FROM inscricoes WHERE atividadeId = ? AND participanteId = ? AND status IN ('confirmada', 'convocada')");
+                psInscricao.setString(1, atividadeId);
+                psInscricao.setString(2, xUsuario);
+                if (!psInscricao.executeQuery().next()) {
+                    ctx.status(403);
+                    ctx.json(Map.of("erro", "NAO_INSCRITO", "mensagem", "Participante não está inscrito na atividade"));
+                    return;
+                }
+
+                List<Map<String, String>> encontros = (List<Map<String, String>>) atv.get("encontros");
+                OffsetDateTime agora = Database.getClock();
+                for (Map<String, String> encontro : encontros) {
+                    if (agora.isBefore(OffsetDateTime.parse(encontro.get("fim")))) {
+                        ctx.status(422);
+                        ctx.json(Map.of("erro", "ATIVIDADE_NAO_ENCERRADA", "mensagem", "Atividade ainda não foi encerrada"));
+                        return;
+                    }
+                }
+
+                PreparedStatement psPresencas = conn.prepareStatement("SELECT COUNT(DISTINCT encontroId) FROM presencas p JOIN encontros e ON e.id = p.encontroId WHERE e.atividadeId = ? AND p.participanteId = ?");
+                psPresencas.setString(1, atividadeId);
+                psPresencas.setString(2, xUsuario);
+                ResultSet rsPresencas = psPresencas.executeQuery();
+                int presencas = rsPresencas.next() ? rsPresencas.getInt(1) : 0;
+                if (presencas < encontros.size()) {
+                    ctx.status(422);
+                    ctx.json(Map.of("erro", "PRESENCA_INSUFICIENTE", "mensagem", "Presença insuficiente para emitir certificado"));
+                    return;
+                }
+
                 PreparedStatement psExistente = conn.prepareStatement("SELECT codigo, atividadeId, participanteId, cargaHorariaMinutos, presencas, encontros, emitidoEm FROM certificados WHERE atividadeId = ? AND participanteId = ?");
                 psExistente.setString(1, atividadeId);
                 psExistente.setString(2, xUsuario);
@@ -871,7 +907,6 @@ public class Main {
                     return;
                 }
 
-                List<Map<String, String>> encontros = (List<Map<String, String>>) atv.get("encontros");
                 int cargaHorariaMinutos = 0;
                 for (Map<String, String> encontro : encontros) {
                     OffsetDateTime inicio = OffsetDateTime.parse(encontro.get("inicio"));
@@ -881,13 +916,14 @@ public class Main {
 
                 String codigo = "SA26-" + UUID.randomUUID().toString().replace("-", "").substring(0, 8).toUpperCase();
                 OffsetDateTime emitidoEm = Database.getClock();
-                PreparedStatement psInsert = conn.prepareStatement("INSERT INTO certificados(codigo, atividadeId, participanteId, cargaHorariaMinutos, presencas, encontros, emitidoEm) VALUES(?, ?, ?, ?, 0, ?, ?)");
+                PreparedStatement psInsert = conn.prepareStatement("INSERT INTO certificados(codigo, atividadeId, participanteId, cargaHorariaMinutos, presencas, encontros, emitidoEm) VALUES(?, ?, ?, ?, ?, ?, ?)");
                 psInsert.setString(1, codigo);
                 psInsert.setString(2, atividadeId);
                 psInsert.setString(3, xUsuario);
                 psInsert.setInt(4, cargaHorariaMinutos);
-                psInsert.setInt(5, encontros.size());
-                psInsert.setString(6, emitidoEm.toString());
+                psInsert.setInt(5, presencas);
+                psInsert.setInt(6, encontros.size());
+                psInsert.setString(7, emitidoEm.toString());
                 psInsert.executeUpdate();
 
                 Map<String, Object> certificado = new HashMap<>();
@@ -895,7 +931,7 @@ public class Main {
                 certificado.put("atividadeId", atividadeId);
                 certificado.put("participanteId", xUsuario);
                 certificado.put("cargaHorariaMinutos", cargaHorariaMinutos);
-                certificado.put("presencas", 0);
+                certificado.put("presencas", presencas);
                 certificado.put("encontros", encontros.size());
                 certificado.put("emitidoEm", emitidoEm.toString());
                 ctx.status(201);
