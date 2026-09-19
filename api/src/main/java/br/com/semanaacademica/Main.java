@@ -510,6 +510,338 @@ public class Main {
             }
         });
 
+        app.get("/encontros/{id}/codigo", ctx -> {
+            String xUsuario = ctx.header("X-Usuario");
+            String role = Database.getUserRole(xUsuario);
+            if (!"organizacao".equals(role)) {
+                ctx.status(403);
+                ctx.json(Map.of("erro", "SOMENTE_ORGANIZACAO", "mensagem", "Apenas organização pode gerar código do encontro"));
+                return;
+            }
+
+            String encontroId = ctx.pathParam("id");
+            try (Connection conn = Database.getConnection()) {
+                PreparedStatement psEncontro = conn.prepareStatement("SELECT atividadeId, inicio, fim FROM encontros WHERE id = ?");
+                psEncontro.setString(1, encontroId);
+                ResultSet rsEncontro = psEncontro.executeQuery();
+                if (!rsEncontro.next()) {
+                    ctx.status(404);
+                    ctx.json(Map.of("erro", "NAO_ENCONTRADO", "mensagem", "Encontro não encontrado"));
+                    return;
+                }
+
+                String atividadeId = rsEncontro.getString("atividadeId");
+                Map<String, Object> atv = buildAtividade(conn, atividadeId);
+                if (atv != null && "cancelada".equals(atv.get("situacao"))) {
+                    ctx.status(422);
+                    ctx.json(Map.of("erro", "ATIVIDADE_CANCELADA", "mensagem", "Atividade cancelada"));
+                    return;
+                }
+
+                Map<String, Object> codigo = gerarCodigoEncontro(encontroId);
+                ctx.json(codigo);
+            }
+        });
+
+        app.post("/encontros/{id}/presencas", ctx -> {
+            String xUsuario = ctx.header("X-Usuario");
+            String role = Database.getUserRole(xUsuario);
+            if (!"participante".equals(role)) {
+                ctx.status(403);
+                ctx.json(Map.of("erro", "SOMENTE_PARTICIPANTE", "mensagem", "Apenas participante pode registrar presença"));
+                return;
+            }
+
+            String encontroId = ctx.pathParam("id");
+            Map body;
+            try {
+                body = ctx.bodyAsClass(Map.class);
+            } catch (Exception e) {
+                ctx.status(422);
+                ctx.json(Map.of("erro", "DADOS_INVALIDOS", "mensagem", "Corpo inválido"));
+                return;
+            }
+
+            if (body == null || !body.containsKey("codigo")) {
+                ctx.status(422);
+                ctx.json(Map.of("erro", "DADOS_INVALIDOS", "mensagem", "Código obrigatório"));
+                return;
+            }
+
+            String codigo = String.valueOf(body.get("codigo"));
+            String lidoEmStr = body.get("lidoEm") == null ? null : String.valueOf(body.get("lidoEm"));
+
+            try (Connection conn = Database.getConnection()) {
+                PreparedStatement psEncontro = conn.prepareStatement("SELECT atividadeId, inicio, fim FROM encontros WHERE id = ?");
+                psEncontro.setString(1, encontroId);
+                ResultSet rsEncontro = psEncontro.executeQuery();
+                if (!rsEncontro.next()) {
+                    ctx.status(404);
+                    ctx.json(Map.of("erro", "NAO_ENCONTRADO", "mensagem", "Encontro não encontrado"));
+                    return;
+                }
+
+                String atividadeId = rsEncontro.getString("atividadeId");
+                Map<String, Object> atv = buildAtividade(conn, atividadeId);
+                if (atv != null && "cancelada".equals(atv.get("situacao"))) {
+                    ctx.status(422);
+                    ctx.json(Map.of("erro", "ATIVIDADE_CANCELADA", "mensagem", "Atividade cancelada"));
+                    return;
+                }
+
+                boolean inscrito = false;
+                PreparedStatement psInscricao = conn.prepareStatement("SELECT id FROM inscricoes WHERE atividadeId = ? AND participanteId = ? AND status IN ('confirmada', 'convocada')");
+                psInscricao.setString(1, atividadeId);
+                psInscricao.setString(2, xUsuario);
+                ResultSet rsInscricao = psInscricao.executeQuery();
+                if (rsInscricao.next()) {
+                    inscrito = true;
+                }
+                if (!inscrito) {
+                    ctx.status(403);
+                    ctx.json(Map.of("erro", "NAO_INSCRITO", "mensagem", "Participante não está inscrito no encontro"));
+                    return;
+                }
+
+                Map<String, Object> codigoValido = gerarCodigoEncontro(encontroId);
+                String codigoEsperado = String.valueOf(codigoValido.get("codigo"));
+                if (!codigoEsperado.equalsIgnoreCase(codigo)) {
+                    ctx.status(422);
+                    ctx.json(Map.of("erro", "CODIGO_INVALIDO", "mensagem", "Código inválido para este encontro"));
+                    return;
+                }
+
+                OffsetDateTime agora = Database.getClock();
+                OffsetDateTime lidoEm = lidoEmStr != null ? OffsetDateTime.parse(lidoEmStr) : agora;
+                OffsetDateTime validoAte = OffsetDateTime.parse(String.valueOf(codigoValido.get("validoAte")));
+                OffsetDateTime inicio = OffsetDateTime.parse(rsEncontro.getString("inicio"));
+                OffsetDateTime fim = OffsetDateTime.parse(rsEncontro.getString("fim"));
+
+                if (!lidoEm.isBefore(validoAte.plusMinutes(1)) && !agora.isBefore(validoAte)) {
+                    ctx.status(422);
+                    ctx.json(Map.of("erro", "FORA_DA_JANELA", "mensagem", "Código fora da janela de presença"));
+                    return;
+                }
+                if (lidoEm.isBefore(inicio.minusHours(1)) || lidoEm.isAfter(fim.plusHours(2))) {
+                    ctx.status(422);
+                    ctx.json(Map.of("erro", "SINCRONIZACAO_TARDIA", "mensagem", "Leitura fora da sincronização esperada"));
+                    return;
+                }
+
+                String origem = (lidoEmStr != null && !lidoEm.isEqual(agora)) ? "qr_offline" : "qr";
+                String presencaId = "pre_" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+                PreparedStatement psExiste = conn.prepareStatement("SELECT id FROM presencas WHERE encontroId = ? AND participanteId = ?");
+                psExiste.setString(1, encontroId);
+                psExiste.setString(2, xUsuario);
+                ResultSet rsExiste = psExiste.executeQuery();
+                if (rsExiste.next()) {
+                    String existenteId = rsExiste.getString("id");
+                    PreparedStatement psGet = conn.prepareStatement("SELECT id, encontroId, participanteId, origem, lidoEm, registradaEm, justificativa FROM presencas WHERE id = ?");
+                    psGet.setString(1, existenteId);
+                    ResultSet rsGet = psGet.executeQuery();
+                    if (rsGet.next()) {
+                        Map<String, Object> presenca = new HashMap<>();
+                        presenca.put("id", rsGet.getString("id"));
+                        presenca.put("encontroId", rsGet.getString("encontroId"));
+                        presenca.put("participanteId", rsGet.getString("participanteId"));
+                        presenca.put("origem", rsGet.getString("origem"));
+                        presenca.put("lidoEm", rsGet.getString("lidoEm"));
+                        presenca.put("registradaEm", rsGet.getString("registradaEm"));
+                        presenca.put("justificativa", rsGet.getString("justificativa"));
+                        ctx.status(200);
+                        ctx.json(presenca);
+                        return;
+                    }
+                }
+
+                PreparedStatement psInsert = conn.prepareStatement("INSERT INTO presencas(id, encontroId, participanteId, origem, lidoEm, registradaEm, justificativa) VALUES(?, ?, ?, ?, ?, ?, NULL)");
+                psInsert.setString(1, presencaId);
+                psInsert.setString(2, encontroId);
+                psInsert.setString(3, xUsuario);
+                psInsert.setString(4, origem);
+                psInsert.setString(5, lidoEm.toString());
+                psInsert.setString(6, agora.toString());
+                psInsert.executeUpdate();
+
+                Map<String, Object> presenca = new HashMap<>();
+                presenca.put("id", presencaId);
+                presenca.put("encontroId", encontroId);
+                presenca.put("participanteId", xUsuario);
+                presenca.put("origem", origem);
+                presenca.put("lidoEm", lidoEm.toString());
+                presenca.put("registradaEm", agora.toString());
+                presenca.put("justificativa", null);
+                ctx.status(201);
+                ctx.json(presenca);
+            }
+        });
+
+        app.post("/encontros/{id}/presencas/manual", ctx -> {
+            String xUsuario = ctx.header("X-Usuario");
+            String role = Database.getUserRole(xUsuario);
+            if (!"organizacao".equals(role)) {
+                ctx.status(403);
+                ctx.json(Map.of("erro", "SOMENTE_ORGANIZACAO", "mensagem", "Apenas organização pode registrar presença manual"));
+                return;
+            }
+
+            String encontroId = ctx.pathParam("id");
+            Map body;
+            try {
+                body = ctx.bodyAsClass(Map.class);
+            } catch (Exception e) {
+                ctx.status(422);
+                ctx.json(Map.of("erro", "DADOS_INVALIDOS", "mensagem", "Corpo inválido"));
+                return;
+            }
+
+            if (body == null || !body.containsKey("participanteId")) {
+                ctx.status(422);
+                ctx.json(Map.of("erro", "DADOS_INVALIDOS", "mensagem", "Participante obrigatório"));
+                return;
+            }
+
+            String participanteId = String.valueOf(body.get("participanteId"));
+            String justificativa = body.get("justificativa") == null ? null : String.valueOf(body.get("justificativa")).trim();
+            if (justificativa == null || justificativa.isEmpty()) {
+                ctx.status(422);
+                ctx.json(Map.of("erro", "JUSTIFICATIVA_OBRIGATORIA", "mensagem", "Justificativa obrigatória para presença manual"));
+                return;
+            }
+
+            try (Connection conn = Database.getConnection()) {
+                PreparedStatement psEncontro = conn.prepareStatement("SELECT atividadeId, inicio, fim FROM encontros WHERE id = ?");
+                psEncontro.setString(1, encontroId);
+                ResultSet rsEncontro = psEncontro.executeQuery();
+                if (!rsEncontro.next()) {
+                    ctx.status(404);
+                    ctx.json(Map.of("erro", "NAO_ENCONTRADO", "mensagem", "Encontro não encontrado"));
+                    return;
+                }
+
+                String atividadeId = rsEncontro.getString("atividadeId");
+                Map<String, Object> atv = buildAtividade(conn, atividadeId);
+                if (atv != null && "cancelada".equals(atv.get("situacao"))) {
+                    ctx.status(422);
+                    ctx.json(Map.of("erro", "ATIVIDADE_CANCELADA", "mensagem", "Atividade cancelada"));
+                    return;
+                }
+
+                PreparedStatement psInscricao = conn.prepareStatement("SELECT id FROM inscricoes WHERE atividadeId = ? AND participanteId = ? AND status IN ('confirmada', 'convocada')");
+                psInscricao.setString(1, atividadeId);
+                psInscricao.setString(2, participanteId);
+                ResultSet rsInscricao = psInscricao.executeQuery();
+                if (!rsInscricao.next()) {
+                    ctx.status(403);
+                    ctx.json(Map.of("erro", "NAO_INSCRITO", "mensagem", "Participante não está inscrito"));
+                    return;
+                }
+
+                PreparedStatement psManual = conn.prepareStatement("SELECT id FROM presencas WHERE encontroId = ? AND participanteId = ? AND origem = 'manual'");
+                psManual.setString(1, encontroId);
+                psManual.setString(2, participanteId);
+                ResultSet rsManual = psManual.executeQuery();
+                if (rsManual.next()) {
+                    ctx.status(422);
+                    ctx.json(Map.of("erro", "LIMITE_DE_MANUAIS", "mensagem", "Limite de presença manual atingido"));
+                    return;
+                }
+
+                OffsetDateTime agora = Database.getClock();
+                OffsetDateTime inicio = OffsetDateTime.parse(rsEncontro.getString("inicio"));
+                OffsetDateTime fim = OffsetDateTime.parse(rsEncontro.getString("fim"));
+                if (agora.isBefore(inicio.minusMinutes(30)) || agora.isAfter(fim.plusMinutes(120))) {
+                    ctx.status(422);
+                    ctx.json(Map.of("erro", "FORA_DA_JANELA", "mensagem", "Presença manual fora da janela"));
+                    return;
+                }
+
+                PreparedStatement psExiste = conn.prepareStatement("SELECT id FROM presencas WHERE encontroId = ? AND participanteId = ?");
+                psExiste.setString(1, encontroId);
+                psExiste.setString(2, participanteId);
+                ResultSet rsExiste = psExiste.executeQuery();
+                if (rsExiste.next()) {
+                    String existenteId = rsExiste.getString("id");
+                    PreparedStatement psGet = conn.prepareStatement("SELECT id, encontroId, participanteId, origem, lidoEm, registradaEm, justificativa FROM presencas WHERE id = ?");
+                    psGet.setString(1, existenteId);
+                    ResultSet rsGet = psGet.executeQuery();
+                    if (rsGet.next()) {
+                        Map<String, Object> presenca = new HashMap<>();
+                        presenca.put("id", rsGet.getString("id"));
+                        presenca.put("encontroId", rsGet.getString("encontroId"));
+                        presenca.put("participanteId", rsGet.getString("participanteId"));
+                        presenca.put("origem", rsGet.getString("origem"));
+                        presenca.put("lidoEm", rsGet.getString("lidoEm"));
+                        presenca.put("registradaEm", rsGet.getString("registradaEm"));
+                        presenca.put("justificativa", rsGet.getString("justificativa"));
+                        ctx.status(200);
+                        ctx.json(presenca);
+                        return;
+                    }
+                }
+
+                String presencaId = "pre_" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+                PreparedStatement psInsert = conn.prepareStatement("INSERT INTO presencas(id, encontroId, participanteId, origem, lidoEm, registradaEm, justificativa) VALUES(?, ?, ?, 'manual', ?, ?, ?)");
+                psInsert.setString(1, presencaId);
+                psInsert.setString(2, encontroId);
+                psInsert.setString(3, participanteId);
+                psInsert.setString(4, agora.toString());
+                psInsert.setString(5, agora.toString());
+                psInsert.setString(6, justificativa);
+                psInsert.executeUpdate();
+
+                Map<String, Object> presenca = new HashMap<>();
+                presenca.put("id", presencaId);
+                presenca.put("encontroId", encontroId);
+                presenca.put("participanteId", participanteId);
+                presenca.put("origem", "manual");
+                presenca.put("lidoEm", agora.toString());
+                presenca.put("registradaEm", agora.toString());
+                presenca.put("justificativa", justificativa);
+                ctx.status(201);
+                ctx.json(presenca);
+            }
+        });
+
+        app.get("/encontros/{id}/presencas", ctx -> {
+            String xUsuario = ctx.header("X-Usuario");
+            String role = Database.getUserRole(xUsuario);
+            if (!"organizacao".equals(role)) {
+                ctx.status(403);
+                ctx.json(Map.of("erro", "SOMENTE_ORGANIZACAO", "mensagem", "Apenas organização pode consultar presenças"));
+                return;
+            }
+
+            String encontroId = ctx.pathParam("id");
+            try (Connection conn = Database.getConnection()) {
+                PreparedStatement psEncontro = conn.prepareStatement("SELECT id FROM encontros WHERE id = ?");
+                psEncontro.setString(1, encontroId);
+                ResultSet rsEncontro = psEncontro.executeQuery();
+                if (!rsEncontro.next()) {
+                    ctx.status(404);
+                    ctx.json(Map.of("erro", "NAO_ENCONTRADO", "mensagem", "Encontro não encontrado"));
+                    return;
+                }
+
+                PreparedStatement ps = conn.prepareStatement("SELECT id, encontroId, participanteId, origem, lidoEm, registradaEm, justificativa FROM presencas WHERE encontroId = ? ORDER BY registradaEm ASC");
+                ps.setString(1, encontroId);
+                ResultSet rs = ps.executeQuery();
+                List<Map<String, Object>> presencas = new ArrayList<>();
+                while (rs.next()) {
+                    Map<String, Object> p = new HashMap<>();
+                    p.put("id", rs.getString("id"));
+                    p.put("encontroId", rs.getString("encontroId"));
+                    p.put("participanteId", rs.getString("participanteId"));
+                    p.put("origem", rs.getString("origem"));
+                    p.put("lidoEm", rs.getString("lidoEm"));
+                    p.put("registradaEm", rs.getString("registradaEm"));
+                    p.put("justificativa", rs.getString("justificativa"));
+                    presencas.add(p);
+                }
+                ctx.json(presencas);
+            }
+        });
+
         app.post("/atividades/{id}/inscricoes", ctx -> {
             String xUsuario = ctx.header("X-Usuario");
             String role = Database.getUserRole(xUsuario);
@@ -951,6 +1283,23 @@ public class Main {
 
     private static boolean isTestMode() {
         return "1".equals(System.getenv("MODO_TESTE")) || "1".equals(System.getProperty("MODO_TESTE"));
+    }
+
+    private static Map<String, Object> gerarCodigoEncontro(String encontroId) {
+        Map<String, Object> codigoInfo = new HashMap<>();
+        OffsetDateTime agora = Database.getClock();
+        String base = encontroId + "-" + agora.toEpochSecond();
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 6; i++) {
+            int code = (base.charAt((i * 3 + 1) % base.length()) + i * 17 + (int) (Math.abs(base.hashCode()) % 36)) % 36;
+            char c = (char) (code < 10 ? code + '0' : (code - 10) + 'A');
+            sb.append(c);
+        }
+        codigoInfo.put("encontroId", encontroId);
+        codigoInfo.put("codigo", sb.toString());
+        codigoInfo.put("trocaEm", agora.plusMinutes(2).toString());
+        codigoInfo.put("validoAte", agora.plusMinutes(15).toString());
+        return codigoInfo;
     }
 
     public static Map<String, Object> buildAtividade(Connection conn, String atvId) throws SQLException {
