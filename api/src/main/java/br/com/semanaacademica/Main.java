@@ -842,6 +842,191 @@ public class Main {
             }
         });
 
+        app.post("/atividades/{id}/certificado", ctx -> {
+            String xUsuario = ctx.header("X-Usuario");
+            String role = Database.getUserRole(xUsuario);
+            if (!"participante".equals(role)) {
+                ctx.status(403);
+                ctx.json(Map.of("erro", "SOMENTE_PARTICIPANTE", "mensagem", "Apenas participante pode emitir certificado"));
+                return;
+            }
+
+            String atividadeId = ctx.pathParam("id");
+            try (Connection conn = Database.getConnection()) {
+                Map<String, Object> atv = buildAtividade(conn, atividadeId);
+                if (atv == null) {
+                    ctx.status(404);
+                    ctx.json(Map.of("erro", "NAO_ENCONTRADO", "mensagem", "Atividade não encontrada"));
+                    return;
+                }
+
+                if ((Boolean) atv.getOrDefault("cancelada", false) || "cancelada".equals(atv.get("situacao"))) {
+                    ctx.status(422);
+                    ctx.json(Map.of("erro", "ATIVIDADE_CANCELADA", "mensagem", "Atividade cancelada"));
+                    return;
+                }
+
+                PreparedStatement psInscricao = conn.prepareStatement("SELECT 1 FROM inscricoes WHERE atividadeId = ? AND participanteId = ? AND status IN ('confirmada', 'convocada')");
+                psInscricao.setString(1, atividadeId);
+                psInscricao.setString(2, xUsuario);
+                if (!psInscricao.executeQuery().next()) {
+                    ctx.status(403);
+                    ctx.json(Map.of("erro", "NAO_INSCRITO", "mensagem", "Participante não está inscrito na atividade"));
+                    return;
+                }
+
+                List<Map<String, String>> encontros = (List<Map<String, String>>) atv.get("encontros");
+                OffsetDateTime agora = Database.getClock();
+                for (Map<String, String> encontro : encontros) {
+                    if (agora.isBefore(OffsetDateTime.parse(encontro.get("fim")))) {
+                        ctx.status(422);
+                        ctx.json(Map.of("erro", "ATIVIDADE_NAO_ENCERRADA", "mensagem", "Atividade ainda não foi encerrada"));
+                        return;
+                    }
+                }
+
+                PreparedStatement psPresencas = conn.prepareStatement("SELECT COUNT(DISTINCT encontroId) FROM presencas p JOIN encontros e ON e.id = p.encontroId WHERE e.atividadeId = ? AND p.participanteId = ?");
+                psPresencas.setString(1, atividadeId);
+                psPresencas.setString(2, xUsuario);
+                ResultSet rsPresencas = psPresencas.executeQuery();
+                int presencas = rsPresencas.next() ? rsPresencas.getInt(1) : 0;
+                if (presencas < encontros.size()) {
+                    ctx.status(422);
+                    ctx.json(Map.of("erro", "PRESENCA_INSUFICIENTE", "mensagem", "Presença insuficiente para emitir certificado"));
+                    return;
+                }
+
+                PreparedStatement psExistente = conn.prepareStatement("SELECT codigo, atividadeId, participanteId, cargaHorariaMinutos, presencas, encontros, emitidoEm FROM certificados WHERE atividadeId = ? AND participanteId = ?");
+                psExistente.setString(1, atividadeId);
+                psExistente.setString(2, xUsuario);
+                ResultSet rsExistente = psExistente.executeQuery();
+                if (rsExistente.next()) {
+                    Map<String, Object> certificado = certificadoMap(rsExistente);
+                    ctx.status(200);
+                    ctx.json(certificado);
+                    return;
+                }
+
+                int cargaHorariaMinutos = 0;
+                for (Map<String, String> encontro : encontros) {
+                    OffsetDateTime inicio = OffsetDateTime.parse(encontro.get("inicio"));
+                    OffsetDateTime fim = OffsetDateTime.parse(encontro.get("fim"));
+                    cargaHorariaMinutos += (int) java.time.Duration.between(inicio, fim).toMinutes();
+                }
+
+                String codigo = "SA26-" + UUID.randomUUID().toString().replace("-", "").substring(0, 8).toUpperCase();
+                OffsetDateTime emitidoEm = Database.getClock();
+                PreparedStatement psInsert = conn.prepareStatement("INSERT INTO certificados(codigo, atividadeId, participanteId, cargaHorariaMinutos, presencas, encontros, emitidoEm) VALUES(?, ?, ?, ?, ?, ?, ?)");
+                psInsert.setString(1, codigo);
+                psInsert.setString(2, atividadeId);
+                psInsert.setString(3, xUsuario);
+                psInsert.setInt(4, cargaHorariaMinutos);
+                psInsert.setInt(5, presencas);
+                psInsert.setInt(6, encontros.size());
+                psInsert.setString(7, emitidoEm.toString());
+                psInsert.executeUpdate();
+
+                Map<String, Object> certificado = new HashMap<>();
+                certificado.put("codigo", codigo);
+                certificado.put("atividadeId", atividadeId);
+                certificado.put("participanteId", xUsuario);
+                certificado.put("cargaHorariaMinutos", cargaHorariaMinutos);
+                certificado.put("presencas", presencas);
+                certificado.put("encontros", encontros.size());
+                certificado.put("emitidoEm", emitidoEm.toString());
+                ctx.status(201);
+                ctx.json(certificado);
+            }
+        });
+
+        app.get("/certificados", ctx -> {
+            String xUsuario = ctx.header("X-Usuario");
+            String role = Database.getUserRole(xUsuario);
+            if (!"participante".equals(role)) {
+                ctx.status(403);
+                ctx.json(Map.of("erro", "SOMENTE_PARTICIPANTE", "mensagem", "Apenas participante pode consultar certificados"));
+                return;
+            }
+
+            try (Connection conn = Database.getConnection()) {
+                PreparedStatement ps = conn.prepareStatement("SELECT codigo, atividadeId, participanteId, cargaHorariaMinutos, presencas, encontros, emitidoEm FROM certificados WHERE participanteId = ? ORDER BY emitidoEm ASC");
+                ps.setString(1, xUsuario);
+                ResultSet rs = ps.executeQuery();
+                List<Map<String, Object>> certificados = new ArrayList<>();
+                while (rs.next()) {
+                    certificados.add(certificadoMap(rs));
+                }
+                ctx.json(certificados);
+            }
+        });
+
+        app.get("/certificados/{codigo}", ctx -> {
+            String codigo = ctx.pathParam("codigo");
+            try (Connection conn = Database.getConnection()) {
+                PreparedStatement ps = conn.prepareStatement("SELECT c.codigo, c.atividadeId, c.participanteId, c.cargaHorariaMinutos, c.emitidoEm, u.nome AS participante, a.titulo AS atividade FROM certificados c JOIN usuarios u ON u.id = c.participanteId JOIN atividades a ON a.id = c.atividadeId WHERE c.codigo = ?");
+                ps.setString(1, codigo);
+                ResultSet rs = ps.executeQuery();
+                if (!rs.next()) {
+                    ctx.status(404);
+                    ctx.json(Map.of("erro", "NAO_ENCONTRADO", "mensagem", "Certificado não encontrado"));
+                    return;
+                }
+
+                Map<String, Object> verificacao = new HashMap<>();
+                verificacao.put("codigo", rs.getString("codigo"));
+                verificacao.put("participante", rs.getString("participante"));
+                verificacao.put("atividade", rs.getString("atividade"));
+                verificacao.put("cargaHorariaMinutos", rs.getInt("cargaHorariaMinutos"));
+                verificacao.put("emitidoEm", rs.getString("emitidoEm"));
+                ctx.json(verificacao);
+            }
+        });
+
+        app.get("/extrato", ctx -> {
+            String xUsuario = ctx.header("X-Usuario");
+            String role = Database.getUserRole(xUsuario);
+            if (!"participante".equals(role)) {
+                ctx.status(403);
+                ctx.json(Map.of("erro", "SOMENTE_PARTICIPANTE", "mensagem", "Apenas participante pode consultar o extrato"));
+                return;
+            }
+
+            try (Connection conn = Database.getConnection()) {
+                PreparedStatement psAtividades = conn.prepareStatement("SELECT a.id, a.titulo, a.tipo, (SELECT c.codigo FROM certificados c WHERE c.atividadeId = a.id AND c.participanteId = ?) AS codigo FROM atividades a JOIN inscricoes i ON i.atividadeId = a.id WHERE i.participanteId = ? AND i.status IN ('confirmada', 'convocada') ORDER BY a.id");
+                psAtividades.setString(1, xUsuario);
+                psAtividades.setString(2, xUsuario);
+                ResultSet rsAtividades = psAtividades.executeQuery();
+                List<Map<String, Object>> itens = new ArrayList<>();
+                int palestrasMinutos = 0;
+                int minicursosMinutos = 0;
+                while (rsAtividades.next()) {
+                    PreparedStatement psDuracao = conn.prepareStatement("SELECT inicio, fim FROM encontros WHERE atividadeId = ?");
+                    psDuracao.setString(1, rsAtividades.getString("id"));
+                    ResultSet rsDuracao = psDuracao.executeQuery();
+                    int cargaHorariaMinutos = 0;
+                    while (rsDuracao.next()) {
+                        cargaHorariaMinutos += (int) java.time.Duration.between(OffsetDateTime.parse(rsDuracao.getString("inicio")), OffsetDateTime.parse(rsDuracao.getString("fim"))).toMinutes();
+                    }
+
+                    Map<String, Object> item = new HashMap<>();
+                    item.put("atividadeId", rsAtividades.getString("id"));
+                    item.put("titulo", rsAtividades.getString("titulo"));
+                    item.put("tipo", rsAtividades.getString("tipo"));
+                    item.put("cargaHorariaMinutos", cargaHorariaMinutos);
+                    item.put("codigo", rsAtividades.getString("codigo"));
+                    itens.add(item);
+                    if ("palestra".equals(rsAtividades.getString("tipo"))) {
+                        palestrasMinutos += cargaHorariaMinutos;
+                    } else if ("minicurso".equals(rsAtividades.getString("tipo"))) {
+                        minicursosMinutos += cargaHorariaMinutos;
+                    }
+                }
+
+                int totalMinutos = palestrasMinutos + minicursosMinutos;
+                ctx.json(Map.of("itens", itens, "palestrasMinutos", palestrasMinutos, "minicursosMinutos", minicursosMinutos, "totalMinutos", totalMinutos, "aproveitadoMinutos", totalMinutos));
+            }
+        });
+
         app.post("/atividades/{id}/inscricoes", ctx -> {
             String xUsuario = ctx.header("X-Usuario");
             String role = Database.getUserRole(xUsuario);
@@ -1300,6 +1485,18 @@ public class Main {
         codigoInfo.put("trocaEm", agora.plusMinutes(2).toString());
         codigoInfo.put("validoAte", agora.plusMinutes(15).toString());
         return codigoInfo;
+    }
+
+    private static Map<String, Object> certificadoMap(ResultSet rs) throws SQLException {
+        Map<String, Object> certificado = new HashMap<>();
+        certificado.put("codigo", rs.getString("codigo"));
+        certificado.put("atividadeId", rs.getString("atividadeId"));
+        certificado.put("participanteId", rs.getString("participanteId"));
+        certificado.put("cargaHorariaMinutos", rs.getInt("cargaHorariaMinutos"));
+        certificado.put("presencas", rs.getInt("presencas"));
+        certificado.put("encontros", rs.getInt("encontros"));
+        certificado.put("emitidoEm", rs.getString("emitidoEm"));
+        return certificado;
     }
 
     public static Map<String, Object> buildAtividade(Connection conn, String atvId) throws SQLException {
