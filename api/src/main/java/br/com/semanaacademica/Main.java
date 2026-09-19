@@ -592,17 +592,19 @@ public class Main {
                 }
 
                 if ("minicurso".equals(atv.get("tipo"))) {
-                    PreparedStatement psMiniCount = conn.prepareStatement(
-                        "SELECT count(*) FROM inscricoes i " +
-                        "JOIN atividades a ON i.atividadeId = a.id " +
-                        "WHERE i.participanteId = ? AND i.status IN ('confirmada', 'convocada') AND a.tipo = 'minicurso'"
-                    );
-                    psMiniCount.setString(1, xUsuario);
-                    try (ResultSet rsMini = psMiniCount.executeQuery()) {
-                        if (rsMini.next() && rsMini.getInt(1) >= 3) {
-                            ctx.status(422);
-                            ctx.json(Map.of("erro", "LIMITE_DE_MINICURSOS", "mensagem", "Limite de minicursos atingido"));
-                            return;
+                    if (willOccupyVacancy) {
+                        PreparedStatement psMiniCount = conn.prepareStatement(
+                            "SELECT count(*) FROM inscricoes i " +
+                            "JOIN atividades a ON i.atividadeId = a.id " +
+                            "WHERE i.participanteId = ? AND i.status IN ('confirmada', 'convocada') AND a.tipo = 'minicurso'"
+                        );
+                        psMiniCount.setString(1, xUsuario);
+                        try (ResultSet rsMini = psMiniCount.executeQuery()) {
+                            if (rsMini.next() && rsMini.getInt(1) >= 3) {
+                                ctx.status(422);
+                                ctx.json(Map.of("erro", "LIMITE_DE_MINICURSOS", "mensagem", "Limite de minicursos atingido"));
+                                return;
+                            }
                         }
                     }
                 }
@@ -847,6 +849,12 @@ public class Main {
                 String convocadaAteStr = rs.getString("convocadaAte");
                 String criadaEm = rs.getString("criadaEm");
 
+                if ("expirada".equals(status)) {
+                    ctx.status(422);
+                    ctx.json(Map.of("erro", "CONVOCACAO_EXPIRADA", "mensagem", "Convocação expirada"));
+                    return;
+                }
+
                 if (!"convocada".equals(status)) {
                     ctx.status(422);
                     ctx.json(Map.of("erro", "SEM_CONVOCACAO", "mensagem", "Inscrição não está convocada"));
@@ -866,6 +874,57 @@ public class Main {
                         ctx.status(422);
                         ctx.json(Map.of("erro", "CONVOCACAO_EXPIRADA", "mensagem", "Convocação expirada"));
                         return;
+                    }
+                }
+
+                Map<String, Object> atv = buildAtividade(conn, atividadeId);
+                if (atv != null) {
+                    List<Map<String, String>> encontrosNew = (List<Map<String, String>>) atv.get("encontros");
+                    boolean hasConflict = false;
+                    PreparedStatement psConflict = conn.prepareStatement(
+                        "SELECT e.inicio, e.fim FROM encontros e " +
+                        "JOIN inscricoes i ON e.atividadeId = i.atividadeId " +
+                        "WHERE i.participanteId = ? AND i.status IN ('confirmada', 'convocada') AND i.id <> ?"
+                    );
+                    psConflict.setString(1, xUsuario);
+                    psConflict.setString(2, id);
+                    try (ResultSet rsConflict = psConflict.executeQuery()) {
+                        while (rsConflict.next()) {
+                            OffsetDateTime exStart = OffsetDateTime.parse(rsConflict.getString("inicio"));
+                            OffsetDateTime exEnd = OffsetDateTime.parse(rsConflict.getString("fim"));
+                            for (Map<String, String> ne : encontrosNew) {
+                                OffsetDateTime nStart = OffsetDateTime.parse(ne.get("inicio"));
+                                OffsetDateTime nEnd = OffsetDateTime.parse(ne.get("fim"));
+                                if (nStart.isBefore(exEnd) && exStart.isBefore(nEnd)) {
+                                    hasConflict = true;
+                                    break;
+                                }
+                            }
+                            if (hasConflict) break;
+                        }
+                    }
+
+                    if (hasConflict) {
+                        ctx.status(409);
+                        ctx.json(Map.of("erro", "CONFLITO_DE_HORARIO", "mensagem", "Conflito de horário"));
+                        return;
+                    }
+
+                    if ("minicurso".equals(atv.get("tipo"))) {
+                        PreparedStatement psMiniCount = conn.prepareStatement(
+                            "SELECT count(*) FROM inscricoes i " +
+                            "JOIN atividades a ON i.atividadeId = a.id " +
+                            "WHERE i.participanteId = ? AND i.status IN ('confirmada', 'convocada') AND a.tipo = 'minicurso' AND i.id <> ?"
+                        );
+                        psMiniCount.setString(1, xUsuario);
+                        psMiniCount.setString(2, id);
+                        try (ResultSet rsMini = psMiniCount.executeQuery()) {
+                            if (rsMini.next() && rsMini.getInt(1) >= 3) {
+                                ctx.status(422);
+                                ctx.json(Map.of("erro", "LIMITE_DE_MINICURSOS", "mensagem", "Limite de minicursos atingido"));
+                                return;
+                            }
+                        }
                     }
                 }
 
@@ -1021,7 +1080,9 @@ public class Main {
             for (String atvId : affectedAtividades) {
                 checkAndConvokeWaitingList(conn, atvId);
             }
-        } catch (Exception e) {}
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
     public static void checkAndConvokeWaitingList(Connection conn, String atvId) throws SQLException {
