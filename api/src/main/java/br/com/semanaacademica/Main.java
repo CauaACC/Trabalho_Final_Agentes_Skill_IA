@@ -506,6 +506,176 @@ public class Main {
             }
         });
 
+        app.post("/atividades/{id}/inscricoes", ctx -> {
+            String xUsuario = ctx.header("X-Usuario");
+            String role = Database.getUserRole(xUsuario);
+            if (!"participante".equals(role)) {
+                ctx.status(403);
+                ctx.json(Map.of("erro", "SOMENTE_PARTICIPANTE", "mensagem", "Apenas participante pode se inscrever"));
+                return;
+            }
+
+            String atividadeId = ctx.pathParam("id");
+            try (Connection conn = Database.getConnection()) {
+                Map<String, Object> atv = buildAtividade(conn, atividadeId);
+                if (atv == null) {
+                    ctx.status(404);
+                    ctx.json(Map.of("erro", "NAO_ENCONTRADO", "mensagem", "Atividade não encontrada"));
+                    return;
+                }
+                if ((Boolean) atv.getOrDefault("cancelada", false) || "cancelada".equals(atv.get("situacao"))) {
+                    ctx.status(422);
+                    ctx.json(Map.of("erro", "ATIVIDADE_CANCELADA", "mensagem", "Atividade cancelada"));
+                    return;
+                }
+
+                List<Map<String, String>> encontros = (List<Map<String, String>>) atv.get("encontros");
+                if (!encontros.isEmpty()) {
+                    OffsetDateTime primeiroInicio = OffsetDateTime.parse(encontros.get(0).get("inicio"));
+                    OffsetDateTime agora = Database.getClock();
+                    if (!agora.isBefore(primeiroInicio.minusMinutes(30))) {
+                        ctx.status(422);
+                        ctx.json(Map.of("erro", "INSCRICOES_ENCERRADAS", "mensagem", "Inscrições encerradas"));
+                        return;
+                    }
+                }
+
+                PreparedStatement psCheck = conn.prepareStatement("SELECT 1 FROM inscricoes WHERE atividadeId = ? AND participanteId = ? AND status IN ('confirmada', 'em_espera', 'convocada')");
+                psCheck.setString(1, atividadeId);
+                psCheck.setString(2, xUsuario);
+                ResultSet rsCheck = psCheck.executeQuery();
+                if (rsCheck.next()) {
+                    ctx.status(409);
+                    ctx.json(Map.of("erro", "JA_INSCRITO", "mensagem", "Já inscrito"));
+                    return;
+                }
+
+                int vagas = (Integer) atv.get("vagas");
+                int ocupadas = (Integer) atv.get("ocupadas");
+
+                String status;
+                Integer posicaoNaEspera = null;
+
+                if (ocupadas < vagas) {
+                    status = "confirmada";
+                } else {
+                    status = "em_espera";
+                    PreparedStatement psEspera = conn.prepareStatement("SELECT count(*) FROM inscricoes WHERE atividadeId = ? AND status = 'em_espera'");
+                    psEspera.setString(1, atividadeId);
+                    ResultSet rsEspera = psEspera.executeQuery();
+                    int countEspera = 0;
+                    if (rsEspera.next()) {
+                        countEspera = rsEspera.getInt(1);
+                    }
+                    posicaoNaEspera = countEspera + 1;
+                }
+
+                String insId = "ins_" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+                String criadaEm = Database.getClock().toString();
+
+                PreparedStatement psIns = conn.prepareStatement("INSERT INTO inscricoes(id, atividadeId, participanteId, status, posicaoNaEspera, convocadaAte, criadaEm) VALUES(?, ?, ?, ?, ?, NULL, ?)");
+                psIns.setString(1, insId);
+                psIns.setString(2, atividadeId);
+                psIns.setString(3, xUsuario);
+                psIns.setString(4, status);
+                if (posicaoNaEspera != null) {
+                    psIns.setInt(5, posicaoNaEspera);
+                } else {
+                    psIns.setNull(5, java.sql.Types.INTEGER);
+                }
+                psIns.setString(6, criadaEm);
+                psIns.executeUpdate();
+
+                Map<String, Object> inscricao = new HashMap<>();
+                inscricao.put("id", insId);
+                inscricao.put("atividadeId", atividadeId);
+                inscricao.put("participanteId", xUsuario);
+                inscricao.put("status", status);
+                inscricao.put("posicaoNaEspera", posicaoNaEspera);
+                inscricao.put("convocadaAte", null);
+                inscricao.put("criadaEm", criadaEm);
+
+                ctx.status(201);
+                ctx.json(inscricao);
+            }
+        });
+
+        app.get("/inscricoes", ctx -> {
+            String xUsuario = ctx.header("X-Usuario");
+            String role = Database.getUserRole(xUsuario);
+            String atividadeIdFiltro = ctx.queryParam("atividadeId");
+
+            List<Map<String, Object>> lista = new ArrayList<>();
+            try (Connection conn = Database.getConnection()) {
+                String sql = "SELECT id, atividadeId, participanteId, status, posicaoNaEspera, convocadaAte, criadaEm FROM inscricoes WHERE 1=1";
+                List<Object> params = new ArrayList<>();
+
+                if ("participante".equals(role)) {
+                    sql += " AND participanteId = ?";
+                    params.add(xUsuario);
+                }
+
+                if (atividadeIdFiltro != null && !atividadeIdFiltro.isEmpty()) {
+                    sql += " AND atividadeId = ?";
+                    params.add(atividadeIdFiltro);
+                }
+
+                try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                    for (int i = 0; i < params.size(); i++) {
+                        ps.setObject(i + 1, params.get(i));
+                    }
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next()) {
+                            Map<String, Object> ins = new HashMap<>();
+                            ins.put("id", rs.getString("id"));
+                            ins.put("atividadeId", rs.getString("atividadeId"));
+                            ins.put("participanteId", rs.getString("participanteId"));
+                            ins.put("status", rs.getString("status"));
+                            int pos = rs.getInt("posicaoNaEspera");
+                            if (rs.wasNull()) {
+                                ins.put("posicaoNaEspera", null);
+                            } else {
+                                ins.put("posicaoNaEspera", pos);
+                            }
+                            ins.put("convocadaAte", rs.getString("convocadaAte"));
+                            ins.put("criadaEm", rs.getString("criadaEm"));
+                            lista.add(ins);
+                        }
+                    }
+                }
+            }
+            ctx.json(lista);
+        });
+
+        app.get("/inscricoes/{id}", ctx -> {
+            String id = ctx.pathParam("id");
+            try (Connection conn = Database.getConnection();
+                 PreparedStatement ps = conn.prepareStatement("SELECT id, atividadeId, participanteId, status, posicaoNaEspera, convocadaAte, criadaEm FROM inscricoes WHERE id = ?")) {
+                ps.setString(1, id);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (!rs.next()) {
+                        ctx.status(404);
+                        ctx.json(Map.of("erro", "NAO_ENCONTRADO", "mensagem", "Inscrição não encontrada"));
+                        return;
+                    }
+                    Map<String, Object> ins = new HashMap<>();
+                    ins.put("id", rs.getString("id"));
+                    ins.put("atividadeId", rs.getString("atividadeId"));
+                    ins.put("participanteId", rs.getString("participanteId"));
+                    ins.put("status", rs.getString("status"));
+                    int pos = rs.getInt("posicaoNaEspera");
+                    if (rs.wasNull()) {
+                        ins.put("posicaoNaEspera", null);
+                    } else {
+                        ins.put("posicaoNaEspera", pos);
+                    }
+                    ins.put("convocadaAte", rs.getString("convocadaAte"));
+                    ins.put("criadaEm", rs.getString("criadaEm"));
+                    ctx.json(ins);
+                }
+            }
+        });
+
         app.start(port);
         return app;
     }
