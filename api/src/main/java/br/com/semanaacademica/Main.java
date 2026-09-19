@@ -33,6 +33,10 @@ public class Main {
                 return;
             }
 
+            try (Connection conn = Database.getConnection()) {
+                processExpirationsAndCascades(conn);
+            } catch (Exception ignored) {}
+
             String xUsuario = ctx.header("X-Usuario");
             if (xUsuario == null || !Database.userExists(xUsuario)) {
                 ctx.status(401);
@@ -752,6 +756,8 @@ public class Main {
                     psUp.executeUpdate();
                 }
 
+                checkAndConvokeWaitingList(conn, atividadeId);
+
                 Map<String, Object> ins = new HashMap<>();
                 ins.put("id", rs.getString("id"));
                 ins.put("atividadeId", atividadeId);
@@ -804,6 +810,79 @@ public class Main {
                     ins.put("criadaEm", rs.getString("criadaEm"));
                     ctx.json(ins);
                 }
+            }
+        });
+
+        app.post("/inscricoes/{id}/confirmacao", ctx -> {
+            String xUsuario = ctx.header("X-Usuario");
+            String role = Database.getUserRole(xUsuario);
+            if (!"participante".equals(role)) {
+                ctx.status(403);
+                ctx.json(Map.of("erro", "SOMENTE_PARTICIPANTE", "mensagem", "Apenas participante"));
+                return;
+            }
+
+            String id = ctx.pathParam("id");
+            try (Connection conn = Database.getConnection()) {
+                processExpirationsAndCascades(conn);
+
+                PreparedStatement ps = conn.prepareStatement("SELECT id, atividadeId, participanteId, status, posicaoNaEspera, convocadaAte, criadaEm FROM inscricoes WHERE id = ?");
+                ps.setString(1, id);
+                ResultSet rs = ps.executeQuery();
+                if (!rs.next()) {
+                    ctx.status(404);
+                    ctx.json(Map.of("erro", "NAO_ENCONTRADO", "mensagem", "Inscrição não encontrada"));
+                    return;
+                }
+
+                String partId = rs.getString("participanteId");
+                if (!partId.equals(xUsuario)) {
+                    ctx.status(404);
+                    ctx.json(Map.of("erro", "NAO_ENCONTRADO", "mensagem", "Inscrição não encontrada"));
+                    return;
+                }
+
+                String status = rs.getString("status");
+                String atividadeId = rs.getString("atividadeId");
+                String convocadaAteStr = rs.getString("convocadaAte");
+                String criadaEm = rs.getString("criadaEm");
+
+                if (!"convocada".equals(status)) {
+                    ctx.status(422);
+                    ctx.json(Map.of("erro", "SEM_CONVOCACAO", "mensagem", "Inscrição não está convocada"));
+                    return;
+                }
+
+                if (convocadaAteStr != null) {
+                    OffsetDateTime ate = OffsetDateTime.parse(convocadaAteStr);
+                    OffsetDateTime agora = Database.getClock();
+                    if (!agora.isBefore(ate)) {
+                        try (PreparedStatement psExp = conn.prepareStatement("UPDATE inscricoes SET status = 'expirada', convocadaAte = NULL WHERE id = ?")) {
+                            psExp.setString(1, id);
+                            psExp.executeUpdate();
+                        }
+                        checkAndConvokeWaitingList(conn, atividadeId);
+
+                        ctx.status(422);
+                        ctx.json(Map.of("erro", "CONVOCACAO_EXPIRADA", "mensagem", "Convocação expirada"));
+                        return;
+                    }
+                }
+
+                try (PreparedStatement psUp = conn.prepareStatement("UPDATE inscricoes SET status = 'confirmada', convocadaAte = NULL WHERE id = ?")) {
+                    psUp.setString(1, id);
+                    psUp.executeUpdate();
+                }
+
+                Map<String, Object> ins = new HashMap<>();
+                ins.put("id", id);
+                ins.put("atividadeId", atividadeId);
+                ins.put("participanteId", partId);
+                ins.put("status", "confirmada");
+                ins.put("posicaoNaEspera", null);
+                ins.put("convocadaAte", null);
+                ins.put("criadaEm", criadaEm);
+                ctx.json(ins);
             }
         });
 
@@ -901,5 +980,147 @@ public class Main {
         atv.put("emEspera", emEspera);
 
         return atv;
+    }
+
+    public static void processExpirationsAndCascades(Connection conn) {
+        try {
+            OffsetDateTime agora = Database.getClock();
+            PreparedStatement psExp = conn.prepareStatement(
+                "SELECT id, atividadeId, convocadaAte FROM inscricoes WHERE status = 'convocada' AND convocadaAte IS NOT NULL"
+            );
+            ResultSet rsExp = psExp.executeQuery();
+            List<Map<String, String>> expiredList = new ArrayList<>();
+            while (rsExp.next()) {
+                String ateStr = rsExp.getString("convocadaAte");
+                if (ateStr != null) {
+                    OffsetDateTime ate = OffsetDateTime.parse(ateStr);
+                    if (!agora.isBefore(ate)) {
+                        Map<String, String> m = new HashMap<>();
+                        m.put("id", rsExp.getString("id"));
+                        m.put("atividadeId", rsExp.getString("atividadeId"));
+                        expiredList.add(m);
+                    }
+                }
+            }
+            rsExp.close();
+            psExp.close();
+
+            Set<String> affectedAtividades = new HashSet<>();
+            for (Map<String, String> exp : expiredList) {
+                String insId = exp.get("id");
+                String atvId = exp.get("atividadeId");
+                try (PreparedStatement psUp = conn.prepareStatement(
+                    "UPDATE inscricoes SET status = 'expirada', convocadaAte = NULL WHERE id = ? AND status = 'convocada'"
+                )) {
+                    psUp.setString(1, insId);
+                    psUp.executeUpdate();
+                }
+                affectedAtividades.add(atvId);
+            }
+
+            for (String atvId : affectedAtividades) {
+                checkAndConvokeWaitingList(conn, atvId);
+            }
+        } catch (Exception e) {}
+    }
+
+    public static void checkAndConvokeWaitingList(Connection conn, String atvId) throws SQLException {
+        while (true) {
+            PreparedStatement psAtv = conn.prepareStatement("SELECT vagas FROM atividades WHERE id = ?");
+            psAtv.setString(1, atvId);
+            ResultSet rsAtv = psAtv.executeQuery();
+            if (!rsAtv.next()) {
+                rsAtv.close();
+                psAtv.close();
+                break;
+            }
+            int vagas = rsAtv.getInt("vagas");
+            rsAtv.close();
+            psAtv.close();
+
+            PreparedStatement psOcc = conn.prepareStatement(
+                "SELECT count(*) FROM inscricoes WHERE atividadeId = ? AND status IN ('confirmada', 'convocada')"
+            );
+            psOcc.setString(1, atvId);
+            ResultSet rsOcc = psOcc.executeQuery();
+            int ocupadas = 0;
+            if (rsOcc.next()) {
+                ocupadas = rsOcc.getInt(1);
+            }
+            rsOcc.close();
+            psOcc.close();
+
+            if (ocupadas >= vagas) {
+                break;
+            }
+
+            PreparedStatement psNext = conn.prepareStatement(
+                "SELECT id FROM inscricoes WHERE atividadeId = ? AND status = 'em_espera' ORDER BY criadaEm ASC, id ASC LIMIT 1"
+            );
+            psNext.setString(1, atvId);
+            ResultSet rsNext = psNext.executeQuery();
+            if (!rsNext.next()) {
+                rsNext.close();
+                psNext.close();
+                break;
+            }
+            String nextInsId = rsNext.getString("id");
+            rsNext.close();
+            psNext.close();
+
+            OffsetDateTime agora = Database.getClock();
+            OffsetDateTime prazo2h = agora.plusHours(2);
+            OffsetDateTime primeiroInicio = getPrimeiroInicio(conn, atvId);
+            OffsetDateTime convocadaAte = (primeiroInicio != null && prazo2h.isAfter(primeiroInicio)) ? primeiroInicio : prazo2h;
+
+            PreparedStatement psConv = conn.prepareStatement(
+                "UPDATE inscricoes SET status = 'convocada', posicaoNaEspera = NULL, convocadaAte = ? WHERE id = ?"
+            );
+            psConv.setString(1, convocadaAte.toString());
+            psConv.setString(2, nextInsId);
+            psConv.executeUpdate();
+            psConv.close();
+
+            reindexEspera(conn, atvId);
+        }
+    }
+
+    public static void reindexEspera(Connection conn, String atvId) throws SQLException {
+        PreparedStatement ps = conn.prepareStatement(
+            "SELECT id FROM inscricoes WHERE atividadeId = ? AND status = 'em_espera' ORDER BY criadaEm ASC, id ASC"
+        );
+        ps.setString(1, atvId);
+        ResultSet rs = ps.executeQuery();
+        int pos = 1;
+        List<String> ids = new ArrayList<>();
+        while (rs.next()) {
+            ids.add(rs.getString("id"));
+        }
+        rs.close();
+        ps.close();
+
+        for (String insId : ids) {
+            PreparedStatement psUp = conn.prepareStatement("UPDATE inscricoes SET posicaoNaEspera = ? WHERE id = ?");
+            psUp.setInt(1, pos++);
+            psUp.setString(2, insId);
+            psUp.executeUpdate();
+            psUp.close();
+        }
+    }
+
+    public static OffsetDateTime getPrimeiroInicio(Connection conn, String atvId) throws SQLException {
+        PreparedStatement ps = conn.prepareStatement("SELECT inicio FROM encontros WHERE atividadeId = ? ORDER BY inicio ASC LIMIT 1");
+        ps.setString(1, atvId);
+        ResultSet rs = ps.executeQuery();
+        OffsetDateTime dt = null;
+        if (rs.next()) {
+            String s = rs.getString("inicio");
+            if (s != null) {
+                dt = OffsetDateTime.parse(s);
+            }
+        }
+        rs.close();
+        ps.close();
+        return dt;
     }
 }
