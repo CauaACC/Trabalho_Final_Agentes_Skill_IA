@@ -2,9 +2,12 @@
   "stack": "Java 21, Javalin, SQLite, HTML+JS", 
   "api": { 
     "pasta": "api", 
-    "instalar": "./mvnw dependency:go-offline", 
-    "iniciar": "./mvnw exec:java -Dexec.mainClass=\\"br.com.semanaacademica.Main\\"", 
-    "testar": "./mvnw test" 
+    "instalar": "mvn -f api/pom.xml dependency:go-offline", 
+    "iniciar": "mvn -f api/pom.xml exec:java -Dexec.mainClass=\"br.com.semanaacademica.Main\"", 
+    "testar": "mvn -f api/pom.xml test" 
   }, 
-  "testes": [] 
+  "testes": [
+    "mvn -f api/pom.xml test",
+    "node --test app/test/certificados.test.js"
+  ]
 }

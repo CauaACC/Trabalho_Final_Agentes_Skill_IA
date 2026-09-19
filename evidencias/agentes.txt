@@ -1,0 +1,17 @@
+# Agentes e skills do projeto
+
+Este arquivo é um inventário factual dos recursos versionados. Ele não substitui as sessões exportadas pelo comando `node evidencias/exportar-evidencias.js --aluno "Seu Nome"`.
+
+## Skills
+- `.opencode/skills/grilling/SKILL.md`
+- `.opencode/skills/to-spec/SKILL.md`
+- `.opencode/skills/tdd/SKILL.md`
+- `.opencode/skills/novo-subagente/SKILL.md`
+- `.opencode/skills/construir_telas/SKILL.md`
+
+## Subagentes
+- `.opencode/agent/auditor.md` — somente leitura; audita regra, origem e teste.
+- `.opencode/agent/revisor_de_contrato.md` — somente leitura; confere API e interface contra o contrato.
+
+## Evidência M3/M4
+As sessões reais de entrevista, spec, implementação e auditoria de M3/M4 ainda precisam ser exportadas. Não foram inventados logs ou sessões para preencher essa lacuna.
