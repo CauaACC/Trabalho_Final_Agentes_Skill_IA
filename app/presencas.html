@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Presença por QR - Semana Acadêmica</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Presença por QR</h1>
+      <nav>
+        <a href="index.html">Programação</a>
+        <a href="inscricoes.html">Minhas Inscrições</a>
+        <a href="nova-atividade.html">Nova Atividade</a>
+      </nav>
+    </header>
+
+    <div id="user-selector-container"></div>
+    <div id="alert-box" class="alert"></div>
+
+    <main class="presence-layout">
+      <section class="card" id="organization-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Organização</p>
+            <h2>QR do encontro</h2>
+          </div>
+          <button id="btn-atualizar-qr" type="button">Atualizar QR</button>
+        </div>
+        <label for="encontro-organizacao">ID do encontro</label>
+        <input id="encontro-organizacao" placeholder="ex.: enc_qr" autocomplete="off">
+        <div id="qr-display" class="qr-display empty-state">Informe um encontro para exibir o código.</div>
+        <div class="qr-meta">
+          <span>Troca em <strong id="troca-em">-</strong></span>
+          <span>Válido até <strong id="valido-ate">-</strong></span>
+        </div>
+        <button id="btn-listar-presencas" type="button" class="secondary-button">Listar presenças</button>
+        <div id="presencas-organizacao" class="presence-list"></div>
+      </section>
+
+      <section class="card" id="participant-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Participante</p>
+            <h2>Registrar presença</h2>
+          </div>
+          <span id="offline-count" class="queue-count">0 pendentes</span>
+        </div>
+        <label for="encontro-participante">ID do encontro</label>
+        <input id="encontro-participante" placeholder="ex.: enc_qr" autocomplete="off">
+        <label for="codigo-presenca">Código do QR</label>
+        <input id="codigo-presenca" maxlength="6" placeholder="Ex.: 2MBT9P" autocomplete="off" class="code-input">
+        <button id="btn-camera" type="button" class="secondary-button">Ler pela câmera</button>
+        <video id="camera-preview" class="camera-preview" playsinline hidden></video>
+        <button id="btn-registrar-presenca" type="button">Registrar presença</button>
+        <button id="btn-sincronizar" type="button" class="secondary-button">Sincronizar pendentes</button>
+        <div id="offline-queue" class="presence-list"></div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+  <script src="presencas.js"></script>
+</body>
+</html>
