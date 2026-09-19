@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Minhas Inscrições - Semana Acadêmica (M2)</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Semana Acadêmica 2026</h1>
+      <nav>
+        <a href="index.html">Programação</a>
+        <a href="inscricoes.html">Minhas Inscrições</a>
+        <a href="nova-atividade.html">Nova Atividade</a>
+      </nav>
+    </header>
+
+    <div id="user-selector-container"></div>
+
+    <div class="card">
+      <h2>Minhas Inscrições e Lista de Espera</h2>
+      <p style="color: var(--text-muted); margin-bottom: 15px; font-size: 14px;">
+        Gerencie suas inscrições, confirme convocações pendentes e cancele participações.
+      </p>
+
+      <div id="alert-box" class="alert"></div>
+
+      <div style="display: flex; justify-content: flex-end; margin-bottom: 15px;">
+        <button id="btn-atualizar">Atualizar Lista</button>
+      </div>
+
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>ID Inscrição</th>
+              <th>Atividade ID</th>
+              <th>Status</th>
+              <th>Detalhes / Prazo</th>
+              <th>Criada Em</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody id="tabela-inscricoes">
+            <tr>
+              <td colspan="6" style="text-align: center; color: var(--text-muted);">Carregando inscrições...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+  <script>
+    async function carregarInscricoes() {
+      clearAlert('alert-box');
+      const tbody = document.getElementById('tabela-inscricoes');
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">Carregando...</td></tr>`;
+
+      try {
+        const inscricoes = await apiFetch('/inscricoes');
+
+        if (!inscricoes || inscricoes.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">Nenhuma inscrição encontrada para o usuário atual.</td></tr>`;
+          return;
+        }
+
+        tbody.innerHTML = inscricoes.map(ins => {
+          let detalhesExtra = '-';
+          if (ins.status === 'em_espera' && ins.posicaoNaEspera !== null) {
+            detalhesExtra = `Posição na espera: <strong>${ins.posicaoNaEspera}</strong>`;
+          } else if (ins.status === 'convocada' && ins.convocadaAte) {
+            detalhesExtra = `Convocada até: <span style="color: var(--warning); font-weight: 600;">${formatarDataIso(ins.convocadaAte)}</span>`;
+          }
+
+          let acoes = '';
+          if (ins.status === 'convocada') {
+            acoes += `<button onclick="confirmarConvocacao('${ins.id}')" style="padding: 4px 8px; font-size: 12px; margin-right: 5px; background: var(--success);">Confirmar</button>`;
+          }
+          if (['confirmada', 'em_espera', 'convocada'].includes(ins.status)) {
+            acoes += `<button onclick="cancelarInscricao('${ins.id}')" class="danger" style="padding: 4px 8px; font-size: 12px;">Cancelar</button>`;
+          }
+          if (!acoes) {
+            acoes = '<span style="color: var(--text-muted);">Sem ações</span>';
+          }
+
+          return `
+            <tr>
+              <td style="font-family: monospace; font-size: 12px;">${escapeHtml(ins.id)}</td>
+              <td>
+                <a href="detalhes.html?id=${ins.atividadeId}" style="color: var(--primary); text-decoration: none; font-family: monospace; font-size: 12px;">${escapeHtml(ins.atividadeId)}</a>
+              </td>
+              <td><span class="badge ${ins.status}">${formatarStatus(ins.status)}</span></td>
+              <td>${detalhesExtra}</td>
+              <td style="font-size: 12px;">${formatarDataIso(ins.criadaEm)}</td>
+              <td>${acoes}</td>
+            </tr>
+          `;
+        }).join('');
+
+      } catch (err) {
+        showError('alert-box', err);
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--danger);">Erro ao carregar inscrições.</td></tr>`;
+      }
+    }
+
+    async function confirmarConvocacao(inscricaoId) {
+      clearAlert('alert-box');
+      try {
+        await apiFetch(`/inscricoes/${inscricaoId}/confirmacao`, {
+          method: 'POST'
+        });
+        showSuccess('alert-box', 'Convocação confirmada com sucesso! Vaga garantida.');
+        carregarInscricoes();
+      } catch (err) {
+        showError('alert-box', err);
+      }
+    }
+
+    async function cancelarInscricao(inscricaoId) {
+      if (!confirm('Tem certeza que deseja cancelar esta inscrição?')) return;
+      clearAlert('alert-box');
+      try {
+        await apiFetch(`/inscricoes/${inscricaoId}/cancelamento`, {
+          method: 'POST'
+        });
+        showSuccess('alert-box', 'Inscrição cancelada com sucesso.');
+        carregarInscricoes();
+      } catch (err) {
+        showError('alert-box', err);
+      }
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+
+    function formatarStatus(status) {
+      const map = {
+        'confirmada': 'Confirmada',
+        'em_espera': 'Em Espera',
+        'convocada': 'Convocada',
+        'cancelada': 'Cancelada',
+        'expirada': 'Expirada'
+      };
+      return map[status] || status;
+    }
+
+    function formatarDataIso(isoStr) {
+      if (!isoStr) return '';
+      try {
+        const d = new Date(isoStr);
+        return d.toLocaleString('pt-BR');
+      } catch (e) {
+        return isoStr;
+      }
+    }
+
+    document.getElementById('btn-atualizar').addEventListener('click', carregarInscricoes);
+    window.addEventListener('userChanged', carregarInscricoes);
+
+    document.addEventListener('DOMContentLoaded', () => {
+      carregarInscricoes();
+    });
+  </script>
+</body>
+</html>

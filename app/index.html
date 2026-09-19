@@ -12,6 +12,7 @@
       <h1>Semana Acadêmica 2026</h1>
       <nav>
         <a href="index.html">Programação</a>
+        <a href="inscricoes.html">Minhas Inscrições</a>
         <a href="nova-atividade.html">Nova Atividade</a>
       </nav>
     </header>
@@ -102,7 +103,8 @@
             <td>${atv.vagasRestantes} / ${atv.vagas}</td>
             <td>${Math.floor(atv.cargaHorariaMinutos / 60)}h (${atv.cargaHorariaMinutos} min)</td>
             <td>
-              <a href="detalhes.html?id=${atv.id}" style="color: var(--primary); text-decoration: none; font-weight: 500;">Ver Detalhes</a>
+              <a href="detalhes.html?id=${atv.id}" style="color: var(--primary); text-decoration: none; font-weight: 500; margin-right: 10px;">Ver Detalhes</a>
+              <button onclick="inscreverAtividade('${atv.id}')" style="padding: 4px 8px; font-size: 12px;">Inscrever-se</button>
             </td>
           </tr>
         `).join('');
@@ -110,6 +112,24 @@
       } catch (err) {
         showError('alert-box', err);
         tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--danger);">Erro ao carregar atividades.</td></tr>`;
+      }
+    }
+
+    async function inscreverAtividade(atividadeId) {
+      clearAlert('alert-box');
+      try {
+        const inscricao = await apiFetch(`/atividades/${atividadeId}/inscricoes`, {
+          method: 'POST'
+        });
+        
+        let msg = `Inscrição realizada com sucesso! Status: <strong>${inscricao.status}</strong>`;
+        if (inscricao.status === 'em_espera') {
+          msg += ` (Posição na espera: ${inscricao.posicaoNaEspera})`;
+        }
+        showSuccess('alert-box', msg);
+        carregarAtividades();
+      } catch (err) {
+        showError('alert-box', err);
       }
     }
 

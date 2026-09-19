@@ -15,8 +15,14 @@ function initUserSelector() {
   const users = [
     { id: 'org-ana', name: 'Ana Beatriz Lima (Organização)' },
     { id: 'org-bruno', name: 'Bruno Tavares (Organização)' },
-    { id: 'p-carla', name: 'Carla Mendes (Participante)' },
-    { id: 'p-diego', name: 'Diego Alves (Participante)' }
+    { id: 'p-carla', name: 'Carla Mendes Souza (Participante)' },
+    { id: 'p-diego', name: 'Diego Alves (Participante)' },
+    { id: 'p-elisa', name: 'Elisa Fernandes (Participante)' },
+    { id: 'p-fabio', name: 'Fábio Nogueira (Participante)' },
+    { id: 'p-gabriela', name: 'Gabriela Moura (Participante)' },
+    { id: 'p-heitor', name: 'Heitor Campos (Participante)' },
+    { id: 'p-isadora', name: 'Isadora Ribeiro (Participante)' },
+    { id: 'p-joao', name: 'João Pedro Martins (Participante)' }
   ];
 
   const savedUser = localStorage.getItem('X-Usuario') || 'org-ana';

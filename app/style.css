@@ -173,6 +173,10 @@ th {
 .badge.em_andamento { background: #dcfce7; color: #15803d; }
 .badge.encerrada { background: #f1f5f9; color: #475569; }
 .badge.cancelada { background: #fee2e2; color: #b91c1c; }
+.badge.confirmada { background: #dcfce7; color: #15803d; }
+.badge.em_espera { background: #fef9c3; color: #a16207; }
+.badge.convocada { background: #e0e7ff; color: #3730a3; }
+.badge.expirada { background: #f1f5f9; color: #64748b; }
 
 .alert {
   padding: 15px;
