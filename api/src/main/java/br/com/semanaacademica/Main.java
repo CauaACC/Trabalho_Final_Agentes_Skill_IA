@@ -982,6 +982,51 @@ public class Main {
             }
         });
 
+        app.get("/extrato", ctx -> {
+            String xUsuario = ctx.header("X-Usuario");
+            String role = Database.getUserRole(xUsuario);
+            if (!"participante".equals(role)) {
+                ctx.status(403);
+                ctx.json(Map.of("erro", "SOMENTE_PARTICIPANTE", "mensagem", "Apenas participante pode consultar o extrato"));
+                return;
+            }
+
+            try (Connection conn = Database.getConnection()) {
+                PreparedStatement psAtividades = conn.prepareStatement("SELECT a.id, a.titulo, a.tipo, (SELECT c.codigo FROM certificados c WHERE c.atividadeId = a.id AND c.participanteId = ?) AS codigo FROM atividades a JOIN inscricoes i ON i.atividadeId = a.id WHERE i.participanteId = ? AND i.status IN ('confirmada', 'convocada') ORDER BY a.id");
+                psAtividades.setString(1, xUsuario);
+                psAtividades.setString(2, xUsuario);
+                ResultSet rsAtividades = psAtividades.executeQuery();
+                List<Map<String, Object>> itens = new ArrayList<>();
+                int palestrasMinutos = 0;
+                int minicursosMinutos = 0;
+                while (rsAtividades.next()) {
+                    PreparedStatement psDuracao = conn.prepareStatement("SELECT inicio, fim FROM encontros WHERE atividadeId = ?");
+                    psDuracao.setString(1, rsAtividades.getString("id"));
+                    ResultSet rsDuracao = psDuracao.executeQuery();
+                    int cargaHorariaMinutos = 0;
+                    while (rsDuracao.next()) {
+                        cargaHorariaMinutos += (int) java.time.Duration.between(OffsetDateTime.parse(rsDuracao.getString("inicio")), OffsetDateTime.parse(rsDuracao.getString("fim"))).toMinutes();
+                    }
+
+                    Map<String, Object> item = new HashMap<>();
+                    item.put("atividadeId", rsAtividades.getString("id"));
+                    item.put("titulo", rsAtividades.getString("titulo"));
+                    item.put("tipo", rsAtividades.getString("tipo"));
+                    item.put("cargaHorariaMinutos", cargaHorariaMinutos);
+                    item.put("codigo", rsAtividades.getString("codigo"));
+                    itens.add(item);
+                    if ("palestra".equals(rsAtividades.getString("tipo"))) {
+                        palestrasMinutos += cargaHorariaMinutos;
+                    } else if ("minicurso".equals(rsAtividades.getString("tipo"))) {
+                        minicursosMinutos += cargaHorariaMinutos;
+                    }
+                }
+
+                int totalMinutos = palestrasMinutos + minicursosMinutos;
+                ctx.json(Map.of("itens", itens, "palestrasMinutos", palestrasMinutos, "minicursosMinutos", minicursosMinutos, "totalMinutos", totalMinutos, "aproveitadoMinutos", totalMinutos));
+            }
+        });
+
         app.post("/atividades/{id}/inscricoes", ctx -> {
             String xUsuario = ctx.header("X-Usuario");
             String role = Database.getUserRole(xUsuario);
