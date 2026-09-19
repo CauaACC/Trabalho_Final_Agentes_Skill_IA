@@ -842,6 +842,67 @@ public class Main {
             }
         });
 
+        app.post("/atividades/{id}/certificado", ctx -> {
+            String xUsuario = ctx.header("X-Usuario");
+            String role = Database.getUserRole(xUsuario);
+            if (!"participante".equals(role)) {
+                ctx.status(403);
+                ctx.json(Map.of("erro", "SOMENTE_PARTICIPANTE", "mensagem", "Apenas participante pode emitir certificado"));
+                return;
+            }
+
+            String atividadeId = ctx.pathParam("id");
+            try (Connection conn = Database.getConnection()) {
+                Map<String, Object> atv = buildAtividade(conn, atividadeId);
+                if (atv == null) {
+                    ctx.status(404);
+                    ctx.json(Map.of("erro", "NAO_ENCONTRADO", "mensagem", "Atividade não encontrada"));
+                    return;
+                }
+
+                PreparedStatement psExistente = conn.prepareStatement("SELECT codigo, atividadeId, participanteId, cargaHorariaMinutos, presencas, encontros, emitidoEm FROM certificados WHERE atividadeId = ? AND participanteId = ?");
+                psExistente.setString(1, atividadeId);
+                psExistente.setString(2, xUsuario);
+                ResultSet rsExistente = psExistente.executeQuery();
+                if (rsExistente.next()) {
+                    Map<String, Object> certificado = certificadoMap(rsExistente);
+                    ctx.status(200);
+                    ctx.json(certificado);
+                    return;
+                }
+
+                List<Map<String, String>> encontros = (List<Map<String, String>>) atv.get("encontros");
+                int cargaHorariaMinutos = 0;
+                for (Map<String, String> encontro : encontros) {
+                    OffsetDateTime inicio = OffsetDateTime.parse(encontro.get("inicio"));
+                    OffsetDateTime fim = OffsetDateTime.parse(encontro.get("fim"));
+                    cargaHorariaMinutos += (int) java.time.Duration.between(inicio, fim).toMinutes();
+                }
+
+                String codigo = "SA26-" + UUID.randomUUID().toString().replace("-", "").substring(0, 8).toUpperCase();
+                OffsetDateTime emitidoEm = Database.getClock();
+                PreparedStatement psInsert = conn.prepareStatement("INSERT INTO certificados(codigo, atividadeId, participanteId, cargaHorariaMinutos, presencas, encontros, emitidoEm) VALUES(?, ?, ?, ?, 0, ?, ?)");
+                psInsert.setString(1, codigo);
+                psInsert.setString(2, atividadeId);
+                psInsert.setString(3, xUsuario);
+                psInsert.setInt(4, cargaHorariaMinutos);
+                psInsert.setInt(5, encontros.size());
+                psInsert.setString(6, emitidoEm.toString());
+                psInsert.executeUpdate();
+
+                Map<String, Object> certificado = new HashMap<>();
+                certificado.put("codigo", codigo);
+                certificado.put("atividadeId", atividadeId);
+                certificado.put("participanteId", xUsuario);
+                certificado.put("cargaHorariaMinutos", cargaHorariaMinutos);
+                certificado.put("presencas", 0);
+                certificado.put("encontros", encontros.size());
+                certificado.put("emitidoEm", emitidoEm.toString());
+                ctx.status(201);
+                ctx.json(certificado);
+            }
+        });
+
         app.post("/atividades/{id}/inscricoes", ctx -> {
             String xUsuario = ctx.header("X-Usuario");
             String role = Database.getUserRole(xUsuario);
@@ -1300,6 +1361,18 @@ public class Main {
         codigoInfo.put("trocaEm", agora.plusMinutes(2).toString());
         codigoInfo.put("validoAte", agora.plusMinutes(15).toString());
         return codigoInfo;
+    }
+
+    private static Map<String, Object> certificadoMap(ResultSet rs) throws SQLException {
+        Map<String, Object> certificado = new HashMap<>();
+        certificado.put("codigo", rs.getString("codigo"));
+        certificado.put("atividadeId", rs.getString("atividadeId"));
+        certificado.put("participanteId", rs.getString("participanteId"));
+        certificado.put("cargaHorariaMinutos", rs.getInt("cargaHorariaMinutos"));
+        certificado.put("presencas", rs.getInt("presencas"));
+        certificado.put("encontros", rs.getInt("encontros"));
+        certificado.put("emitidoEm", rs.getString("emitidoEm"));
+        return certificado;
     }
 
     public static Map<String, Object> buildAtividade(Connection conn, String atvId) throws SQLException {
