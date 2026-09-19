@@ -960,6 +960,28 @@ public class Main {
             }
         });
 
+        app.get("/certificados/{codigo}", ctx -> {
+            String codigo = ctx.pathParam("codigo");
+            try (Connection conn = Database.getConnection()) {
+                PreparedStatement ps = conn.prepareStatement("SELECT c.codigo, c.atividadeId, c.participanteId, c.cargaHorariaMinutos, c.emitidoEm, u.nome AS participante, a.titulo AS atividade FROM certificados c JOIN usuarios u ON u.id = c.participanteId JOIN atividades a ON a.id = c.atividadeId WHERE c.codigo = ?");
+                ps.setString(1, codigo);
+                ResultSet rs = ps.executeQuery();
+                if (!rs.next()) {
+                    ctx.status(404);
+                    ctx.json(Map.of("erro", "NAO_ENCONTRADO", "mensagem", "Certificado não encontrado"));
+                    return;
+                }
+
+                Map<String, Object> verificacao = new HashMap<>();
+                verificacao.put("codigo", rs.getString("codigo"));
+                verificacao.put("participante", rs.getString("participante"));
+                verificacao.put("atividade", rs.getString("atividade"));
+                verificacao.put("cargaHorariaMinutos", rs.getInt("cargaHorariaMinutos"));
+                verificacao.put("emitidoEm", rs.getString("emitidoEm"));
+                ctx.json(verificacao);
+            }
+        });
+
         app.post("/atividades/{id}/inscricoes", ctx -> {
             String xUsuario = ctx.header("X-Usuario");
             String role = Database.getUserRole(xUsuario);
