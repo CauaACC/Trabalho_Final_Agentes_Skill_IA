@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Certificados - Semana Acadêmica</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Certificados</h1>
+      <nav>
+        <a href="index.html">Programação</a>
+        <a href="inscricoes.html">Minhas Inscrições</a>
+        <a href="presencas.html">Presença QR</a>
+      </nav>
+    </header>
+
+    <div id="user-selector-container"></div>
+    <div id="alert-box" class="alert"></div>
+
+    <main class="certificate-layout">
+      <section class="card" id="participant-certificates">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Participante</p>
+            <h2>Meus certificados</h2>
+          </div>
+          <button id="btn-carregar-certificados" type="button">Atualizar</button>
+        </div>
+        <div id="certificate-list" class="certificate-list"></div>
+        <div class="extract-summary">
+          <div><span>Palestras</span><strong id="total-palestras">0 min</strong></div>
+          <div><span>Minicursos</span><strong id="total-minicursos">0 min</strong></div>
+          <div><span>Total</span><strong id="total-horas">0 min</strong></div>
+          <div><span>Aproveitado</span><strong id="total-aproveitado">0 min</strong></div>
+        </div>
+      </section>
+
+      <section class="card public-verification">
+        <p class="eyebrow">Consulta pública</p>
+        <h2>Verificar certificado</h2>
+        <label for="codigo-certificado">Código do certificado</label>
+        <input id="codigo-certificado" placeholder="Ex.: SA26-7K2M9QXA" autocomplete="off">
+        <button id="btn-verificar-certificado" type="button">Verificar</button>
+        <div id="verification-result" class="verification-result empty-state">Informe um código para consultar.</div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+  <script src="certificados.js"></script>
+</body>
+</html>

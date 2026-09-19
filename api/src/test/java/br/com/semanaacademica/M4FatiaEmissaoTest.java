@@ -45,6 +45,7 @@ public class M4FatiaEmissaoTest {
             stmt.execute("INSERT INTO atividades(id, titulo, tipo, salaId, vagas, cancelada) VALUES('atv_cert', 'Minicurso certificado', 'minicurso', 'lab-3', 20, 0)");
             stmt.execute("INSERT INTO encontros(id, atividadeId, inicio, fim) VALUES('enc_cert', 'atv_cert', '2026-10-19T10:00:00-03:00', '2026-10-19T12:00:00-03:00')");
             stmt.execute("INSERT INTO inscricoes(id, atividadeId, participanteId, status, criadaEm) VALUES('ins_cert', 'atv_cert', 'p-carla', 'confirmada', '2026-10-19T09:00:00-03:00')");
+            stmt.execute("INSERT INTO presencas(id, encontroId, participanteId, origem, lidoEm, registradaEm, justificativa) VALUES('pre_cert', 'enc_cert', 'p-carla', 'qr', '2026-10-19T10:10:00-03:00', '2026-10-19T10:10:00-03:00', NULL)");
         }
 
         HttpRequest request = HttpRequest.newBuilder().uri(URI.create(baseUrl + "/atividades/atv_cert/certificado"))
