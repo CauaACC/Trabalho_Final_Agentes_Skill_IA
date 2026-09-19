@@ -939,6 +939,27 @@ public class Main {
             }
         });
 
+        app.get("/certificados", ctx -> {
+            String xUsuario = ctx.header("X-Usuario");
+            String role = Database.getUserRole(xUsuario);
+            if (!"participante".equals(role)) {
+                ctx.status(403);
+                ctx.json(Map.of("erro", "SOMENTE_PARTICIPANTE", "mensagem", "Apenas participante pode consultar certificados"));
+                return;
+            }
+
+            try (Connection conn = Database.getConnection()) {
+                PreparedStatement ps = conn.prepareStatement("SELECT codigo, atividadeId, participanteId, cargaHorariaMinutos, presencas, encontros, emitidoEm FROM certificados WHERE participanteId = ? ORDER BY emitidoEm ASC");
+                ps.setString(1, xUsuario);
+                ResultSet rs = ps.executeQuery();
+                List<Map<String, Object>> certificados = new ArrayList<>();
+                while (rs.next()) {
+                    certificados.add(certificadoMap(rs));
+                }
+                ctx.json(certificados);
+            }
+        });
+
         app.post("/atividades/{id}/inscricoes", ctx -> {
             String xUsuario = ctx.header("X-Usuario");
             String role = Database.getUserRole(xUsuario);
