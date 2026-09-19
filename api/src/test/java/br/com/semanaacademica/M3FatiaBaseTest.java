@@ -103,7 +103,7 @@ public class M3FatiaBaseTest {
 
         assertEquals(201, response.statusCode());
         Map<?, ?> json = mapper.readValue(response.body(), Map.class);
-        assertEquals("qr", json.get("origem"));
+        assertEquals("qr_offline", json.get("origem"));
         assertEquals("p-carla", json.get("participanteId"));
         assertEquals("enc_qr", json.get("encontroId"));
     }
